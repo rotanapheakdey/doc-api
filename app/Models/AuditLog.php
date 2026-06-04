@@ -7,4 +7,5 @@ use Illuminate\Database\Eloquent\Model;
 class AuditLog extends Model
 {
     //
+    protected $guarded = [];
 }

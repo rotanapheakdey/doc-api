@@ -13,6 +13,17 @@ return new class extends Migration
     {
         Schema::create('audit_logs', function (Blueprint $table) {
             $table->id();
+
+            $table->foreignId('user_id')->constrained('users')->onDelete('cascade');
+            $table->foreignId('document_id')->constrained()->onDelete('cascade');
+            $table->enum('action', [
+                'uploaded',
+                'routed',
+                'approved',
+                'signed',
+                'archived'
+            ]);
+            $table->string('notes')->nullable();
             $table->timestamps();
         });
     }
