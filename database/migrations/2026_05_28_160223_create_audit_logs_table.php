@@ -18,10 +18,11 @@ return new class extends Migration
             $table->foreignId('document_id')->constrained()->onDelete('cascade');
             $table->enum('action', [
                 'uploaded',
-                'routed',
-                'directed',
-                'approved',
-                'signed',
+                'assigned',
+                'dispatched',
+                'report_submitted',
+                'vdg_signed',
+                'dg_signed',
                 'archived'
             ]);
             $table->string('notes')->nullable();

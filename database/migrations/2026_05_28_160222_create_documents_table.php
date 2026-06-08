@@ -22,12 +22,12 @@ return new class extends Migration
             $table->text('file_dept_comment')->nullable();
 
             //workflow
-            $table->enum('status',[
+            $table->enum('status', [
                 'pending_dg_init',
+                'pending_dispatch',
                 'dg_directed',
-                'processing_dept',
-                'pending_vdg',
-                'dg_approved',
+                'pending_vdg_approval',
+                'pending_dg_approval',
                 'dg_signed',
                 'completed_archive'
             ])->default('pending_dg_init');
