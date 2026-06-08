@@ -11,8 +11,8 @@ Route::post('/login',[AuthController::class, 'login']);
 // PROTECTED ROUTES: You MUST have a valid token to access these
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/documents', [DocumentController::class, 'store']);
+    Route::post('/documents/{id}/direct', [DocumentController::class, 'direct']);
     Route::get('/documents/urgent', [DocumentController::class, 'urgentFeed']);
-
     //logout
     Route::post('/logout', [AuthController::class, 'logout']);
 });

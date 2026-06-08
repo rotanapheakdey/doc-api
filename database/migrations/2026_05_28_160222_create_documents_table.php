@@ -16,7 +16,7 @@ return new class extends Migration
 
             $table->foreignId('uploaded_by_user_id')->constrained('users')->onDelete('cascade');
             $table->foreignId('assigned_department_id')->nullable()->constrained('departments')->onDelete('set null');
-            $table->string('controll_no')->unique();
+            $table->string('control_no')->unique();
             $table->string('title');
             $table->string('file_path');
             $table->text('file_dept_comment')->nullable();

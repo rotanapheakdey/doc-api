@@ -10,9 +10,9 @@ use Illuminate\Support\Facades\Auth;
 
 class DocumentController extends Controller
 {
-    // --------------------------------------------------------
+
     // 1. UPLOAD A NEW DOCUMENT (Restricted to File Dept)
-    // --------------------------------------------------------
+
     public function store(Request $request)
     {
         $user = Auth::user();
@@ -59,9 +59,9 @@ class DocumentController extends Controller
         ], 201);
     }
 
-    // --------------------------------------------------------
+
     // 2. THE SMART URGENT FEED (Changes based on Role)
-    // --------------------------------------------------------
+
     public function urgentFeed()
     {
         $user = Auth::user();
@@ -100,5 +100,59 @@ class DocumentController extends Controller
             'urgent_count' => $documents->count(),
             'documents' => $documents
         ]);
+    }
+
+    //3. DG direct
+    public function direct(Request $request, $id)
+    {
+        $user = Auth::user();
+
+        if ($user->role !== 'dg') {
+            return response()->json(['message' => 'Unauthorized. Only DG can direct.'], 403);
+        }
+        //validate that a valid target department is provided
+        $request->validate([
+            'assigned_department_id' => 'required|exists:departments,id',
+
+            'dg_note' => 'nullable|string|max:500'
+        ]);
+
+        //find target document
+        $document = Document::findOrFail($id);
+
+        // Guard: Ensure it's actually in the initiation phase
+        if ($document->status !== 'pending_dg_init') {
+            return response()->json(['message' => 'This document has already pssed the initiation phase.'], 40);
+        }
+
+        //update document record state
+        $document->update([
+            'assigned_department_id' => $request->assigned_department_id,
+
+            'status' => 'dg_directed',
+        ]);
+
+        //log action to audit
+        AuditLog::create([
+            'user_id' => $user->id,
+            'document_id' => $document->id,
+            'action' => 'directed',
+            'notes' => 'DG directed documnet to Department #' . $request->assigned_department_id . '. Note:' . ($request->dg_note || 'None')
+        ]);
+
+        return response()->json([
+            'message' => 'Document Directed to department successfully',
+            'document' => $document
+        ], 200);
+
+        $document->load([
+            'uploader:id,name',
+            'department:id,name'
+        ]);
+
+        return response()->json([
+            'message' => 'Document directed to department successfully!',
+            'document' => $document
+        ], 200);
     }
 }

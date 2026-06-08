@@ -19,6 +19,7 @@ return new class extends Migration
             $table->enum('action', [
                 'uploaded',
                 'routed',
+                'directed',
                 'approved',
                 'signed',
                 'archived'
