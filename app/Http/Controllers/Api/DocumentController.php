@@ -401,4 +401,42 @@ class DocumentController extends Controller
             'documents' => $documents
         ], 200);
     }
+
+    public function downloadFile($id)
+    {
+        $document = Document::findOrFail($id);
+
+        if (!$document->file_path) {
+            return response()->json(['message' => 'No file attached.'], 404);
+        }
+
+        $absolutePath = storage_path('app/public/' . $document->file_path);
+
+        if (!file_exists($absolutePath)) {
+            return response()->json(['message' => 'File not found on disk.'], 404);
+        }
+
+        if (ob_get_level()) {
+            ob_end_clean();
+        }
+
+        return response()->stream(function () use ($absolutePath) {
+            $stream = fopen($absolutePath, 'rb');
+
+            while (!feof($stream)) {
+                echo fread($stream, 8192);
+                flush();
+            }
+            fclose($stream);
+
+            // Prevents a known Android Emulator race condition where the TCP
+            // socket drops before the final bytes are received over local Wi-Fi.
+            sleep(1);
+
+        }, 200, [
+            'Content-Type'      => 'application/pdf',
+            'Content-Length'    => filesize($absolutePath),
+            'X-Accel-Buffering' => 'no',
+        ]);
+    }
 }
