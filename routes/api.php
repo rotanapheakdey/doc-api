@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\DepartmentController;
 use App\Http\Controllers\Api\DocumentController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -32,6 +33,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/documents/{id}/archive', [DocumentController::class, 'archive']);
 
     Route::get('/documents/archive', [DocumentController::class, 'searchArchive']);
+    Route::get('/documents/{id}/download', [DocumentController::class, 'downloadFile']);
+
+    Route::get('/departments', [DepartmentController::class, 'index']);
     // Logout
     Route::post('/logout', [AuthController::class, 'logout']);
 });

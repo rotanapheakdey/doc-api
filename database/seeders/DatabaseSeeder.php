@@ -74,11 +74,6 @@ class DatabaseSeeder extends Seeder
 
         // 4. SEED THE 7-STEP PIPELINE
 
-
-// ==========================================
-        // 4. THE MASSIVE 21-DOCUMENT SEEDER
-        // ==========================================
-
         $sampleDocs = [
             // ---------------------------------------------------------
             // PHASE 1: pending_dg_init (Sitting on DG's Urgent Feed)
