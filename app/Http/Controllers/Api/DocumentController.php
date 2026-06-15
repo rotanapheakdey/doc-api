@@ -7,6 +7,9 @@ use Illuminate\Http\Request;
 use App\Models\Document;
 use App\Models\AuditLog;
 use Illuminate\Support\Facades\Auth;
+// use Barryvdh\DomPDF\Facade\Pdf;
+// use PDF;
+use Illuminate\Support\Facades\Storage;
 
 class DocumentController extends Controller
 {
@@ -69,32 +72,61 @@ class DocumentController extends Controller
 
         $request->validate([
             'assigned_department_id' => 'required|exists:departments,id',
-            'dg_note' => 'nullable|string|max:500'
+            'dg_note' => 'nullable|string|max:500',
+            'note' => 'nullable|string|max:500'
         ]);
 
         $document = Document::findOrFail($id);
 
         if ($document->status !== 'pending_dg_init') {
-            return response()->json(['message' => 'Document is not in initiation phase.'], 422);
+            return response()->json(['message' => 'Document is not in initiation phase.'], 422); //[cite: 3]
         }
 
-        // 💡 Loop back: Moves to pending_dispatch so File Dept gets it back
+        $department = \App\Models\Department::find($request->assigned_department_id); //[cite: 3]
+        $executiveNote = $request->input('dg_note') ?? $request->input('note') ?? 'No additional notes provided.';
+
+        $html = '
+            <div style="font-family: Arial, sans-serif; padding: 40px; text-align: center;">
+                <h1 style="color: #1976D2; border-bottom: 2px solid #1976D2; padding-bottom: 10px;">Executive Assignment Directive</h1>
+                <h3 style="color: #555;">Control Tracking Number: ' . $document->control_no . '</h3>
+                <br>
+                <div style="text-align: left; padding: 20px; background: #f9f9f9; border: 1px solid #ddd;">
+                    <p><strong>Primary Document Title:</strong> ' . $document->title . '</p>
+                    <p><strong>Officially Assigned To:</strong> ' . $department->name . ' Department</p>
+                    <p><strong>Executive Instructions:</strong> ' . $executiveNote . '</p>
+                </div>
+                <br><br>
+                <div style="text-align: right; margin-top: 50px;">
+                    <p>_____________________________________</p>
+                    <p><strong>Director General (Electronic Signature)</strong></p>
+                    <p>Authorized via DMS Platform</p>
+                </div>
+            </div>
+        ';
+
+        $pdf = app('dompdf.wrapper')->loadHTML($html);
+
+        $generatedTemplatePath = 'directives/DIR-' . $document->control_no . '-' . time() . '.pdf';
+        Storage::disk('public')->put($generatedTemplatePath, $pdf->output());
+
         $document->update([
             'assigned_department_id' => $request->assigned_department_id,
+            'dg_note' => $executiveNote,
+            'directive_file_path' => $generatedTemplatePath,
             'status' => 'pending_dispatch',
         ]);
 
-        AuditLog::create([
+        \App\Models\AuditLog::create([
             'user_id' => $user->id,
             'document_id' => $document->id,
             'action' => 'assigned',
-            'notes' => 'DG assigned file to Department #' . $request->assigned_department_id . '. Executive Note: ' . ($request->dg_note ?? 'None')
+            'notes' => 'DG assigned file to ' . $department->name . '. Official signature and seal template dynamically generated.'
         ]);
 
         $document->load(['uploader:id,name', 'department:id,name']);
 
         return response()->json([
-            'message' => 'Document assigned. Sent back to File Department for final dispatch.',
+            'message' => 'Document assigned. Official directive template compiled and routed back to File Department.',
             'document' => $document
         ], 200);
     }
@@ -367,7 +399,10 @@ class DocumentController extends Controller
                 break;
         }
 
-        $documents = $query->oldest()->get();
+        // --- FIXED HERE: Eager load the required relationships ---
+        $documents = $query->with(['uploader:id,name', 'department:id,name'])
+                           ->oldest()
+                           ->get();
 
         return response()->json([
             'role' => $user->role,
@@ -402,15 +437,17 @@ class DocumentController extends Controller
         ], 200);
     }
 
-    public function downloadFile($id)
+    public function downloadFile(\Illuminate\Http\Request $request, $id)
     {
         $document = Document::findOrFail($id);
 
-        if (!$document->file_path) {
+        $targetPath = $request->query('directive') ? $document->directive_file_path : $document->file_path;
+
+        if (!$targetPath) {
             return response()->json(['message' => 'No file attached.'], 404);
         }
 
-        $absolutePath = storage_path('app/public/' . $document->file_path);
+        $absolutePath = storage_path('app/public/' . $targetPath);
 
         if (!file_exists($absolutePath)) {
             return response()->json(['message' => 'File not found on disk.'], 404);
@@ -429,8 +466,6 @@ class DocumentController extends Controller
             }
             fclose($stream);
 
-            // Prevents a known Android Emulator race condition where the TCP
-            // socket drops before the final bytes are received over local Wi-Fi.
             sleep(1);
 
         }, 200, [
@@ -439,4 +474,6 @@ class DocumentController extends Controller
             'X-Accel-Buffering' => 'no',
         ]);
     }
+
+
 }
