@@ -4,45 +4,43 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use App\Models\User;
+use Illuminate\Support\Facades\Hash;
+
 class AuthController extends Controller
 {
-    //
-    public function login( Request $request){
+    public function login(Request $request)
+    {
         $request->validate([
-            'email'=>'required|email',
-            'password'=>'required'
+            'email' => 'required|email',
+            'password' => 'required',
         ]);
 
+        $user = User::with('department')->where('email', $request->email)->first();
 
-        if(!Auth::attempt($request->only('email', 'password'))){
-            return response()->json([
-                'message' => 'invalid login credentials'
-            ], 401);
+        if (! $user || ! Hash::check($request->password, $user->password)) {
+            return response()->json(['message' => 'Invalid administrative credentials.'], 401);
         }
 
-        $user = User::where('email', $request->email)->firstOrFail();
-        $token = $user->createToken('mobile_app_token')->plainTextToken;
+        $token = $user->createToken('mobile_session')->plainTextToken;
 
         return response()->json([
             'access_token' => $token,
             'token_type' => 'Bearer',
-            'user' =>[
+            'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
                 'role' => $user->role,
-                'department_id'=>$user->department_id,
+                'department_id' => $user->department_id,
+                'department_name' => $user->department?->name
             ]
-        ]);
+        ], 200);
     }
 
-    public function logout( Request $request){
+    public function logout(Request $request)
+    {
         $request->user()->currentAccessToken()->delete();
-        return response()->json([
-            'message' => 'successfully logged out'
-        ]);
+        return response()->json(['message' => 'Session terminated cleanly.'], 200);
     }
-
 }
