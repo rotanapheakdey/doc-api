@@ -78,7 +78,6 @@ class DocumentController extends Controller
             return response()->json(['message' => 'Document is not in initiation phase.'], 422);
         }
 
-        // 💡 Loop back: Moves to pending_dispatch so File Dept gets it back
         $document->update([
             'assigned_department_id' => $request->assigned_department_id,
             'status' => 'pending_dispatch',
@@ -122,7 +121,6 @@ class DocumentController extends Controller
             return response()->json(['message' => 'This document is not awaiting dispatch.'], 422);
         }
 
-        // Dispatch: Update comment if provided, transition status so VDG can see it
         $document->update([
             'status' => 'dg_directed',
             'file_dept_comment' => $request->additional_comment
@@ -174,9 +172,10 @@ class DocumentController extends Controller
 
         $reportPath = $request->file('report_file')->store('reports', 'public');
 
+        // 🌟 FIX: Use report_path column to keep original file_path safe!
         $document->update([
             'status' => 'pending_vdg_approval',
-            'file_path' => $reportPath
+            'report_path' => $reportPath
         ]);
 
         AuditLog::create([
@@ -300,21 +299,63 @@ class DocumentController extends Controller
         ], 200);
     }
 
+    /**
+     * ✨ ADDED FEATURE: BACKTRACK REJECTION PIPELINE
+     */
+    public function reject(Request $request, $id)
+    {
+        $user = Auth::user();
+
+        if (!in_array($user->role, ['vdg', 'dg'])) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+
+        $request->validate(['notes' => 'required|string|max:500']);
+        $document = Document::findOrFail($id);
+
+        if (!in_array($document->status, ['pending_vdg_approval', 'pending_dg_approval'])) {
+            return response()->json(['message' => 'Document is not in a review stage.'], 422);
+        }
+
+        $document->update(['status' => 'dg_directed']);
+
+        AuditLog::create([
+            'user_id' => $user->id,
+            'document_id' => $document->id,
+            'action' => 'assigned',
+            'notes' => 'REJECTED BY ' . strtoupper($user->role) . '. Reason: ' . $request->notes
+        ]);
+
+        return response()->json(['message' => 'Document sent back to staff desk for corrections.']);
+    }
+
+    /**
+     * ✨ ADDED FEATURE: DETAILED PROFILE VIEW
+     */
+    public function show($id)
+    {
+        $user = Auth::user();
+        $document = Document::with(['uploader:id,name', 'department:id,name', 'auditLogs.user:id,name'])->findOrFail($id);
+
+        if (in_array($user->role, ['vdg', 'staff', 'department'])) {
+            if ($document->assigned_department_id !== $user->department_id) {
+                return response()->json(['message' => 'Access Denied.'], 403);
+            }
+        }
+
+        return response()->json($document, 200);
+    }
+
     // SEARCH & ARCHIVE VISIBILITY
     public function searchArchive(Request $request)
     {
         $user = Auth::user();
-
-        // Base Query: Only look at files that are permanently locked
         $query = Document::where('status', 'completed_archive');
 
-        // 🛡️ THE SECURITY GATE:
         if (in_array($user->role, ['vdg', 'staff', 'department'])) {
-            // Rule 1: Department accounts can ONLY see files assigned to their specific ID
             $query->where('assigned_department_id', $user->department_id);
         }
 
-        // Rule 2: If the user is 'dg' or 'file_dept', we don't add the filter above.
         if ($request->has('search') && $request->search != '') {
             $searchTerm = $request->search;
             $query->where(function($q) use ($searchTerm) {
@@ -323,7 +364,6 @@ class DocumentController extends Controller
             });
         }
 
-        // Fetch the results
         $documents = $query->with(['uploader:id,name', 'department:id,name'])
                            ->orderBy('updated_at', 'desc')
                            ->get();
@@ -402,15 +442,21 @@ class DocumentController extends Controller
         ], 200);
     }
 
+    /**
+     * 🌟 FIX: SMART FILE STREAM ENGINE
+     */
     public function downloadFile($id)
     {
         $document = Document::findOrFail($id);
 
-        if (!$document->file_path) {
+        // Fallback: Use action report file if available, otherwise deliver the original file
+        $filePath = $document->report_path ?? $document->file_path;
+
+        if (!$filePath) {
             return response()->json(['message' => 'No file attached.'], 404);
         }
 
-        $absolutePath = storage_path('app/public/' . $document->file_path);
+        $absolutePath = storage_path('app/public/' . $filePath);
 
         if (!file_exists($absolutePath)) {
             return response()->json(['message' => 'File not found on disk.'], 404);
@@ -429,8 +475,6 @@ class DocumentController extends Controller
             }
             fclose($stream);
 
-            // Prevents a known Android Emulator race condition where the TCP
-            // socket drops before the final bytes are received over local Wi-Fi.
             sleep(1);
 
         }, 200, [
