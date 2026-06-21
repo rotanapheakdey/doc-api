@@ -7,9 +7,6 @@ use Illuminate\Http\Request;
 use App\Models\Document;
 use App\Models\AuditLog;
 use Illuminate\Support\Facades\Auth;
-// use Barryvdh\DomPDF\Facade\Pdf;
-// use PDF;
-use Illuminate\Support\Facades\Storage;
 
 class DocumentController extends Controller
 {
@@ -18,6 +15,27 @@ class DocumentController extends Controller
     /**
      * 1. UPLOAD A NEW DOCUMENT (Restricted to File Dept)
      */
+    public function index()
+{
+    $user = Auth::user();
+
+    // DG and File Dept can see all
+    if (in_array($user->role, ['dg', 'file_dept'])) {
+        $documents = Document::with(['uploader:id,name', 'department:id,name'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+    } else {
+        // Others only see their department's documents
+        $documents = Document::with(['uploader:id,name', 'department:id,name'])
+            ->where('assigned_department_id', $user->department_id)
+            ->orderBy('created_at', 'desc')
+            ->get();
+    }
+
+    return response()->json([
+        'documents' => $documents
+    ], 200);
+}
     public function store(Request $request)
     {
         $user = Auth::user();
@@ -72,61 +90,31 @@ class DocumentController extends Controller
 
         $request->validate([
             'assigned_department_id' => 'required|exists:departments,id',
-            'dg_note' => 'nullable|string|max:500',
-            'note' => 'nullable|string|max:500'
+            'dg_note' => 'nullable|string|max:500'
         ]);
 
         $document = Document::findOrFail($id);
 
         if ($document->status !== 'pending_dg_init') {
-            return response()->json(['message' => 'Document is not in initiation phase.'], 422); //[cite: 3]
+            return response()->json(['message' => 'Document is not in initiation phase.'], 422);
         }
-
-        $department = \App\Models\Department::find($request->assigned_department_id); //[cite: 3]
-        $executiveNote = $request->input('dg_note') ?? $request->input('note') ?? 'No additional notes provided.';
-
-        $html = '
-            <div style="font-family: Arial, sans-serif; padding: 40px; text-align: center;">
-                <h1 style="color: #1976D2; border-bottom: 2px solid #1976D2; padding-bottom: 10px;">Executive Assignment Directive</h1>
-                <h3 style="color: #555;">Control Tracking Number: ' . $document->control_no . '</h3>
-                <br>
-                <div style="text-align: left; padding: 20px; background: #f9f9f9; border: 1px solid #ddd;">
-                    <p><strong>Primary Document Title:</strong> ' . $document->title . '</p>
-                    <p><strong>Officially Assigned To:</strong> ' . $department->name . ' Department</p>
-                    <p><strong>Executive Instructions:</strong> ' . $executiveNote . '</p>
-                </div>
-                <br><br>
-                <div style="text-align: right; margin-top: 50px;">
-                    <p>_____________________________________</p>
-                    <p><strong>Director General (Electronic Signature)</strong></p>
-                    <p>Authorized via DMS Platform</p>
-                </div>
-            </div>
-        ';
-
-        $pdf = app('dompdf.wrapper')->loadHTML($html);
-
-        $generatedTemplatePath = 'directives/DIR-' . $document->control_no . '-' . time() . '.pdf';
-        Storage::disk('public')->put($generatedTemplatePath, $pdf->output());
 
         $document->update([
             'assigned_department_id' => $request->assigned_department_id,
-            'dg_note' => $executiveNote,
-            'directive_file_path' => $generatedTemplatePath,
             'status' => 'pending_dispatch',
         ]);
 
-        \App\Models\AuditLog::create([
+        AuditLog::create([
             'user_id' => $user->id,
             'document_id' => $document->id,
             'action' => 'assigned',
-            'notes' => 'DG assigned file to ' . $department->name . '. Official signature and seal template dynamically generated.'
+            'notes' => 'DG assigned file to Department #' . $request->assigned_department_id . '. Executive Note: ' . ($request->dg_note ?? 'None')
         ]);
 
         $document->load(['uploader:id,name', 'department:id,name']);
 
         return response()->json([
-            'message' => 'Document assigned. Official directive template compiled and routed back to File Department.',
+            'message' => 'Document assigned. Sent back to File Department for final dispatch.',
             'document' => $document
         ], 200);
     }
@@ -154,7 +142,6 @@ class DocumentController extends Controller
             return response()->json(['message' => 'This document is not awaiting dispatch.'], 422);
         }
 
-        // Dispatch: Update comment if provided, transition status so VDG can see it
         $document->update([
             'status' => 'dg_directed',
             'file_dept_comment' => $request->additional_comment
@@ -206,9 +193,10 @@ class DocumentController extends Controller
 
         $reportPath = $request->file('report_file')->store('reports', 'public');
 
+        // 🌟 FIX: Use report_path column to keep original file_path safe!
         $document->update([
             'status' => 'pending_vdg_approval',
-            'file_path' => $reportPath
+            'report_path' => $reportPath
         ]);
 
         AuditLog::create([
@@ -332,21 +320,63 @@ class DocumentController extends Controller
         ], 200);
     }
 
+    /**
+     * ✨ ADDED FEATURE: BACKTRACK REJECTION PIPELINE
+     */
+    public function reject(Request $request, $id)
+    {
+        $user = Auth::user();
+
+        if (!in_array($user->role, ['vdg', 'dg'])) {
+            return response()->json(['message' => 'Unauthorized.'], 403);
+        }
+
+        $request->validate(['notes' => 'required|string|max:500']);
+        $document = Document::findOrFail($id);
+
+        if (!in_array($document->status, ['pending_vdg_approval', 'pending_dg_approval'])) {
+            return response()->json(['message' => 'Document is not in a review stage.'], 422);
+        }
+
+        $document->update(['status' => 'dg_directed']);
+
+        AuditLog::create([
+            'user_id' => $user->id,
+            'document_id' => $document->id,
+            'action' => 'assigned',
+            'notes' => 'REJECTED BY ' . strtoupper($user->role) . '. Reason: ' . $request->notes
+        ]);
+
+        return response()->json(['message' => 'Document sent back to staff desk for corrections.']);
+    }
+
+    /**
+     * ✨ ADDED FEATURE: DETAILED PROFILE VIEW
+     */
+    public function show($id)
+    {
+        $user = Auth::user();
+        $document = Document::with(['uploader:id,name', 'department:id,name', 'auditLogs.user:id,name'])->findOrFail($id);
+
+        if (in_array($user->role, ['vdg', 'staff', 'department'])) {
+            if ($document->assigned_department_id !== $user->department_id) {
+                return response()->json(['message' => 'Access Denied.'], 403);
+            }
+        }
+
+        return response()->json($document, 200);
+    }
+
     // SEARCH & ARCHIVE VISIBILITY
     public function searchArchive(Request $request)
     {
         $user = Auth::user();
-
-        // Base Query: Only look at files that are permanently locked
         $query = Document::where('status', 'completed_archive');
 
-        // 🛡️ THE SECURITY GATE:
         if (in_array($user->role, ['vdg', 'staff', 'department'])) {
-            // Rule 1: Department accounts can ONLY see files assigned to their specific ID
             $query->where('assigned_department_id', $user->department_id);
         }
 
-        // Rule 2: If the user is 'dg' or 'file_dept', we don't add the filter above.
         if ($request->has('search') && $request->search != '') {
             $searchTerm = $request->search;
             $query->where(function($q) use ($searchTerm) {
@@ -355,7 +385,6 @@ class DocumentController extends Controller
             });
         }
 
-        // Fetch the results
         $documents = $query->with(['uploader:id,name', 'department:id,name'])
                            ->orderBy('updated_at', 'desc')
                            ->get();
@@ -399,10 +428,7 @@ class DocumentController extends Controller
                 break;
         }
 
-        // --- FIXED HERE: Eager load the required relationships ---
-        $documents = $query->with(['uploader:id,name', 'department:id,name'])
-                           ->oldest()
-                           ->get();
+        $documents = $query->oldest()->get();
 
         return response()->json([
             'role' => $user->role,
@@ -437,17 +463,21 @@ class DocumentController extends Controller
         ], 200);
     }
 
-    public function downloadFile(\Illuminate\Http\Request $request, $id)
+    /**
+     * 🌟 FIX: SMART FILE STREAM ENGINE
+     */
+    public function downloadFile($id)
     {
         $document = Document::findOrFail($id);
 
-        $targetPath = $request->query('directive') ? $document->directive_file_path : $document->file_path;
+        // Fallback: Use action report file if available, otherwise deliver the original file
+        $filePath = $document->report_path ?? $document->file_path;
 
-        if (!$targetPath) {
+        if (!$filePath) {
             return response()->json(['message' => 'No file attached.'], 404);
         }
 
-        $absolutePath = storage_path('app/public/' . $targetPath);
+        $absolutePath = storage_path('app/public/' . $filePath);
 
         if (!file_exists($absolutePath)) {
             return response()->json(['message' => 'File not found on disk.'], 404);
@@ -474,6 +504,4 @@ class DocumentController extends Controller
             'X-Accel-Buffering' => 'no',
         ]);
     }
-
-
 }
