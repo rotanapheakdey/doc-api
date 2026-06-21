@@ -74,17 +74,18 @@
       <li class="nav-item dropdown">
         <a class="nav-link" data-toggle="dropdown" href="#">
           <i class="fas fa-user-circle"></i>
-          <span class="d-none d-sm-inline">John Doe</span>
+          <span class="d-none d-sm-inline">{{ user.name || 'John Doe' }}</span>
         </a>
         <div class="dropdown-menu dropdown-menu-right">
-          <a href="#" class="dropdown-item">
+          <router-link to="/profile" class="dropdown-item">
             <i class="fas fa-user mr-2"></i> Profile
-          </a>
+          </router-link>
           <a href="#" class="dropdown-item">
             <i class="fas fa-cog mr-2"></i> Settings
           </a>
           <div class="dropdown-divider"></div>
-          <a href="#" class="dropdown-item text-danger">
+          <!-- ✅ LOGOUT - Added @click.prevent -->
+          <a href="#" class="dropdown-item text-danger" @click.prevent="handleLogout">
             <i class="fas fa-sign-out-alt mr-2"></i> Logout
           </a>
         </div>
@@ -92,3 +93,36 @@
     </ul>
   </nav>
 </template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+
+const router = useRouter()
+const authStore = useAuthStore()
+const user = ref({})
+
+// ✅ LOGOUT FUNCTION - Only logic added
+const handleLogout = async () => {
+  if (!confirm('Are you sure you want to logout?')) return
+
+  try {
+    await authStore.logout()
+    router.push('/login')
+  } catch (error) {
+    console.error('Logout error:', error)
+    // Force logout even if API fails
+    localStorage.removeItem('auth_token')
+    localStorage.removeItem('user')
+    router.push('/login')
+  }
+}
+
+onMounted(() => {
+  const userData = localStorage.getItem('user')
+  if (userData) {
+    user.value = JSON.parse(userData)
+  }
+})
+</script>

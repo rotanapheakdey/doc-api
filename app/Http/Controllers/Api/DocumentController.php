@@ -15,6 +15,27 @@ class DocumentController extends Controller
     /**
      * 1. UPLOAD A NEW DOCUMENT (Restricted to File Dept)
      */
+    public function index()
+{
+    $user = Auth::user();
+
+    // DG and File Dept can see all
+    if (in_array($user->role, ['dg', 'file_dept'])) {
+        $documents = Document::with(['uploader:id,name', 'department:id,name'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+    } else {
+        // Others only see their department's documents
+        $documents = Document::with(['uploader:id,name', 'department:id,name'])
+            ->where('assigned_department_id', $user->department_id)
+            ->orderBy('created_at', 'desc')
+            ->get();
+    }
+
+    return response()->json([
+        'documents' => $documents
+    ], 200);
+}
     public function store(Request $request)
     {
         $user = Auth::user();

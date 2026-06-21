@@ -29,4 +29,9 @@ class User extends Authenticatable
     {
         return $this->belongsTo(Department::class, 'department_id');
     }
+       // Check if user can have department
+    public function canHaveDepartment()
+    {
+        return !in_array($this->role, ['dg', 'file_dept']);
+    }
 }
