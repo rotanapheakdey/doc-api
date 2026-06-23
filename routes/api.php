@@ -20,6 +20,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/users/{id}', [UserController::class, 'destroy']);
     Route::get('/departments/list', [UserController::class, 'getDepartments']);
 
+
+    Route::post('/users/{id}/avatar', [UserController::class, 'updateAvatar']);
+    Route::delete('/users/{id}/avatar', [UserController::class, 'removeAvatar']);
     // Core Visibility Feeds
     Route::get('/documents/urgent', [DocumentController::class, 'urgentFeed']);
     Route::get('/departments/inbox', [DocumentController::class, 'departmentInbox']);
