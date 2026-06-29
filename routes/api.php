@@ -45,8 +45,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Phase 7: Archive (File Dept)
     Route::post('/documents/{id}/archive', [DocumentController::class, 'archive']);
 
-    Route::get('/documents/archive', [DocumentController::class, 'searchArchive']);
     Route::get('/documents/{id}/download', [DocumentController::class, 'downloadFile']);
+    Route::get('/documents/{id}/report/download', [DocumentController::class, 'downloadReportFile']);
 
     Route::get('/departments', [DepartmentController::class, 'index']);
     // Logout

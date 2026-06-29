@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\Document;
 use App\Models\AuditLog;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 
 class DocumentController extends Controller
 {
@@ -225,10 +226,6 @@ class DocumentController extends Controller
 
         $document = Document::findOrFail($id);
 
-        if ($document->assigned_department_id !== $user->department_id) {
-            return response()->json(['message' => 'Access Denied.'], 403);
-        }
-
         if ($document->status !== 'pending_vdg_approval') {
             return response()->json(['message' => 'No report found awaiting signature.'], 422);
         }
@@ -358,7 +355,7 @@ class DocumentController extends Controller
         $user = Auth::user();
         $document = Document::with(['uploader:id,name', 'department:id,name', 'auditLogs.user:id,name'])->findOrFail($id);
 
-        if (in_array($user->role, ['vdg', 'staff', 'department'])) {
+        if (in_array($user->role, ['staff', 'department'])) {
             if ($document->assigned_department_id !== $user->department_id) {
                 return response()->json(['message' => 'Access Denied.'], 403);
             }
@@ -373,7 +370,7 @@ class DocumentController extends Controller
         $user = Auth::user();
         $query = Document::where('status', 'completed_archive');
 
-        if (in_array($user->role, ['vdg', 'staff', 'department'])) {
+        if (in_array($user->role, ['staff', 'department'])) {
             $query->where('assigned_department_id', $user->department_id);
         }
 
@@ -423,8 +420,7 @@ class DocumentController extends Controller
                 break;
 
             case 'vdg':
-                $query->where('assigned_department_id', $user->department_id)
-                      ->where('status', 'pending_vdg_approval');
+                $query->where('status', 'pending_vdg_approval');
                 break;
         }
 
@@ -463,43 +459,98 @@ class DocumentController extends Controller
         ], 200);
     }
 
+    private function resolveAbsolutePath($filePath)
+    {
+        if (!$filePath) return null;
+
+        $path = storage_path('app/public/' . ltrim($filePath, '/\\'));
+        if (file_exists($path)) return $path;
+
+        try {
+            $diskPath = Storage::disk('public')->path($filePath);
+            if (file_exists($diskPath)) return $diskPath;
+        } catch (\Exception $e) {}
+
+        $cleaned = preg_replace('#^(public/|storage/|app/public/)#', '', ltrim($filePath, '/\\'));
+        $cleanedPath = storage_path('app/public/' . $cleaned);
+        if (file_exists($cleanedPath)) return $cleanedPath;
+
+        $appPath = storage_path('app/' . ltrim($filePath, '/\\'));
+        if (file_exists($appPath)) return $appPath;
+
+        return null;
+    }
+
     /**
      * 🌟 FIX: SMART FILE STREAM ENGINE
      */
     public function downloadFile($id)
     {
         $document = Document::findOrFail($id);
-
-        // Fallback: Use action report file if available, otherwise deliver the original file
-        $filePath = $document->report_path ?? $document->file_path;
+        $filePath = $document->file_path;
 
         if (!$filePath) {
             return response()->json(['message' => 'No file attached.'], 404);
         }
 
-        $absolutePath = storage_path('app/public/' . $filePath);
+        $absolutePath = $this->resolveAbsolutePath($filePath);
 
-        if (!file_exists($absolutePath)) {
-            return response()->json(['message' => 'File not found on disk.'], 404);
+        if (!$absolutePath) {
+            return response()->json(['message' => 'Original file not found on server storage.'], 404);
         }
 
         if (ob_get_level()) {
             ob_end_clean();
         }
 
+        $mimeType = mime_content_type($absolutePath) ?: 'application/pdf';
+
         return response()->stream(function () use ($absolutePath) {
             $stream = fopen($absolutePath, 'rb');
-
             while (!feof($stream)) {
                 echo fread($stream, 8192);
                 flush();
             }
             fclose($stream);
-
-            sleep(1);
-
         }, 200, [
-            'Content-Type'      => 'application/pdf',
+            'Content-Type'      => $mimeType,
+            'Content-Length'    => filesize($absolutePath),
+            'X-Accel-Buffering' => 'no',
+        ]);
+    }
+
+    /**
+     * 🌟 STREAM ACTION REPORT FILE
+     */
+    public function downloadReportFile($id)
+    {
+        $document = Document::findOrFail($id);
+
+        if (!$document->report_path) {
+            return response()->json(['message' => 'No action report attached to this document yet.'], 404);
+        }
+
+        $absolutePath = $this->resolveAbsolutePath($document->report_path);
+
+        if (!$absolutePath) {
+            return response()->json(['message' => 'Report file not found on server storage.'], 404);
+        }
+
+        if (ob_get_level()) {
+            ob_end_clean();
+        }
+
+        $mimeType = mime_content_type($absolutePath) ?: 'application/pdf';
+
+        return response()->stream(function () use ($absolutePath) {
+            $stream = fopen($absolutePath, 'rb');
+            while (!feof($stream)) {
+                echo fread($stream, 8192);
+                flush();
+            }
+            fclose($stream);
+        }, 200, [
+            'Content-Type'      => $mimeType,
             'Content-Length'    => filesize($absolutePath),
             'X-Accel-Buffering' => 'no',
         ]);
