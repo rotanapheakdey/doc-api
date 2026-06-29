@@ -27,6 +27,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/documents/urgent', [DocumentController::class, 'urgentFeed']);
     Route::get('/departments/inbox', [DocumentController::class, 'departmentInbox']);
 
+    Route::get('/documents/archive', [DocumentController::class, 'searchArchive']);
     // The 7-Step State Machine Action Routes
     // Phase 1: Upload (File Dept)
     Route::post('/documents', [DocumentController::class, 'store']);
