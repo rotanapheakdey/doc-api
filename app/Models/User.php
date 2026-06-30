@@ -20,6 +20,7 @@ class User extends Authenticatable
         'role',
         'department_id',
         'avatar',
+        'signature',
     ];
 
     protected $hidden = [
@@ -27,7 +28,7 @@ class User extends Authenticatable
         'remember_token',
     ];
 
-    protected $appends = ['avatar_url']; // Add this to automatically include avatar URL in JSON responses
+    protected $appends = ['avatar_url', 'signature_url']; // Add this to automatically include avatar/signature URL in JSON responses
 
     public function getAvatarUrlAttribute()
     {
@@ -39,6 +40,14 @@ class User extends Authenticatable
         // Generate default avatar with user's initials
         $name = urlencode($this->name);
         return "https://ui-avatars.com/api/?name={$name}&background=random&size=100&bold=true";
+    }
+
+    public function getSignatureUrlAttribute()
+    {
+        if ($this->signature && Storage::disk('public')->exists($this->signature)) {
+            return Storage::url($this->signature);
+        }
+        return null;
     }
 
     public function department(): BelongsTo

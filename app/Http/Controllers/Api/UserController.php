@@ -318,4 +318,85 @@ class UserController extends Controller
             'avatar_url' => $user->avatar_url
         ], 200);
     }
+
+    public function updateSignature(Request $request, $id)
+    {
+        $user = User::find($id);
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found'
+            ], 404);
+        }
+
+        $authenticatedUser = auth('sanctum')->user();
+
+        if (!$authenticatedUser || $authenticatedUser->id !== $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You can only update your own signature'
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'signature' => 'required|image|mimes:png|max:2048',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        if ($request->hasFile('signature') && $request->file('signature')->isValid()) {
+            if ($user->signature) {
+                Storage::disk('public')->delete($user->signature);
+            }
+
+            $signaturePath = $request->file('signature')->store('signatures', 'public');
+            $user->signature = $signaturePath;
+            $user->save();
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Signature updated successfully',
+            'signature_url' => $user->signature_url
+        ], 200);
+    }
+
+    public function removeSignature($id)
+    {
+        $user = User::find($id);
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'User not found'
+            ], 404);
+        }
+
+        $authenticatedUser = auth('sanctum')->user();
+
+        if (!$authenticatedUser || $authenticatedUser->id !== $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You can only remove your own signature'
+            ], 403);
+        }
+
+        if ($user->signature) {
+            Storage::disk('public')->delete($user->signature);
+            $user->signature = null;
+            $user->save();
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Signature removed successfully',
+            'signature_url' => $user->signature_url
+        ], 200);
+    }
 }

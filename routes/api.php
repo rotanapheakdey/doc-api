@@ -23,11 +23,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::post('/users/{id}/avatar', [UserController::class, 'updateAvatar']);
     Route::delete('/users/{id}/avatar', [UserController::class, 'removeAvatar']);
+    Route::post('/users/{id}/signature', [UserController::class, 'updateSignature']);
+    Route::delete('/users/{id}/signature', [UserController::class, 'removeSignature']);
     // Core Visibility Feeds
     Route::get('/documents/urgent', [DocumentController::class, 'urgentFeed']);
     Route::get('/departments/inbox', [DocumentController::class, 'departmentInbox']);
 
-    Route::get('/documents/archive', [DocumentController::class, 'searchArchive']);
     // The 7-Step State Machine Action Routes
     // Phase 1: Upload (File Dept)
     Route::post('/documents', [DocumentController::class, 'store']);
@@ -45,6 +46,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Phase 7: Archive (File Dept)
     Route::post('/documents/{id}/archive', [DocumentController::class, 'archive']);
 
+    Route::get('/documents/archive', [DocumentController::class, 'searchArchive']);
     Route::get('/documents/{id}/download', [DocumentController::class, 'downloadFile']);
     Route::get('/documents/{id}/report/download', [DocumentController::class, 'downloadReportFile']);
 

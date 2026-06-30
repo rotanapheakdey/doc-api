@@ -91,13 +91,36 @@ class DocumentController extends Controller
 
         $request->validate([
             'assigned_department_id' => 'required|exists:departments,id',
-            'dg_note' => 'nullable|string|max:500'
+            'dg_note' => 'nullable|string|max:500',
+            'x' => 'nullable|numeric',
+            'y' => 'nullable|numeric',
+            'width' => 'nullable|numeric',
+            'height' => 'nullable|numeric',
+            'page' => 'nullable|integer',
         ]);
 
         $document = Document::findOrFail($id);
 
         if ($document->status !== 'pending_dg_init') {
             return response()->json(['message' => 'Document is not in initiation phase.'], 422);
+        }
+
+        if ($request->has(['x', 'y', 'page', 'width', 'height'])) {
+            if (!$user->signature) {
+                return response()->json(['message' => 'Please register your signature in your profile first.'], 422);
+            }
+            $burned = $this->burnSignatureIntoPdf(
+                $document->file_path,
+                $user->signature,
+                $request->x,
+                $request->y,
+                $request->width,
+                $request->height,
+                $request->page
+            );
+            if (!$burned) {
+                return response()->json(['message' => 'Failed to apply signature to PDF.'], 500);
+            }
         }
 
         $document->update([
@@ -134,13 +157,36 @@ class DocumentController extends Controller
         }
 
         $request->validate([
-            'additional_comment' => 'nullable|string|max:500'
+            'additional_comment' => 'nullable|string|max:500',
+            'x' => 'nullable|numeric',
+            'y' => 'nullable|numeric',
+            'width' => 'nullable|numeric',
+            'height' => 'nullable|numeric',
+            'page' => 'nullable|integer',
         ]);
 
         $document = Document::findOrFail($id);
 
         if ($document->status !== 'pending_dispatch') {
             return response()->json(['message' => 'This document is not awaiting dispatch.'], 422);
+        }
+
+        if ($request->has(['x', 'y', 'page', 'width', 'height'])) {
+            if (!$user->signature) {
+                return response()->json(['message' => 'Please register your signature in your profile first.'], 422);
+            }
+            $burned = $this->burnSignatureIntoPdf(
+                $document->file_path,
+                $user->signature,
+                $request->x,
+                $request->y,
+                $request->width,
+                $request->height,
+                $request->page
+            );
+            if (!$burned) {
+                return response()->json(['message' => 'Failed to apply signature to PDF.'], 500);
+            }
         }
 
         $document->update([
@@ -216,7 +262,7 @@ class DocumentController extends Controller
     /**
      * 5. VDG SIGN OFF (VDG signs the report, sending it up to the top office)
      */
-    public function vdgSign($id)
+    public function vdgSign(Request $request, $id)
     {
         $user = Auth::user();
 
@@ -224,10 +270,40 @@ class DocumentController extends Controller
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
+        $request->validate([
+            'x' => 'nullable|numeric',
+            'y' => 'nullable|numeric',
+            'width' => 'nullable|numeric',
+            'height' => 'nullable|numeric',
+            'page' => 'nullable|integer',
+        ]);
+
         $document = Document::findOrFail($id);
 
         if ($document->status !== 'pending_vdg_approval') {
             return response()->json(['message' => 'No report found awaiting signature.'], 422);
+        }
+
+        if (!$document->report_path) {
+            return response()->json(['message' => 'No report file attached to sign.'], 422);
+        }
+
+        if ($request->has(['x', 'y', 'page', 'width', 'height'])) {
+            if (!$user->signature) {
+                return response()->json(['message' => 'Please register your signature in your profile first.'], 422);
+            }
+            $burned = $this->burnSignatureIntoPdf(
+                $document->report_path,
+                $user->signature,
+                $request->x,
+                $request->y,
+                $request->width,
+                $request->height,
+                $request->page
+            );
+            if (!$burned) {
+                return response()->json(['message' => 'Failed to apply signature to PDF.'], 500);
+            }
         }
 
         $document->update([
@@ -252,7 +328,7 @@ class DocumentController extends Controller
     /**
      * 6. DG FINAL SIGN (Director General gives executive sign-off)
      */
-    public function dgFinalSign($id)
+    public function dgFinalSign(Request $request, $id)
     {
         $user = Auth::user();
 
@@ -260,10 +336,40 @@ class DocumentController extends Controller
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
+        $request->validate([
+            'x' => 'nullable|numeric',
+            'y' => 'nullable|numeric',
+            'width' => 'nullable|numeric',
+            'height' => 'nullable|numeric',
+            'page' => 'nullable|integer',
+        ]);
+
         $document = Document::findOrFail($id);
 
         if ($document->status !== 'pending_dg_approval') {
             return response()->json(['message' => 'Document is not awaiting final executive sign-off.'], 422);
+        }
+
+        if (!$document->report_path) {
+            return response()->json(['message' => 'No report file attached to sign.'], 422);
+        }
+
+        if ($request->has(['x', 'y', 'page', 'width', 'height'])) {
+            if (!$user->signature) {
+                return response()->json(['message' => 'Please register your signature in your profile first.'], 422);
+            }
+            $burned = $this->burnSignatureIntoPdf(
+                $document->report_path,
+                $user->signature,
+                $request->x,
+                $request->y,
+                $request->width,
+                $request->height,
+                $request->page
+            );
+            if (!$burned) {
+                return response()->json(['message' => 'Failed to apply signature to PDF.'], 500);
+            }
         }
 
         $document->update([
@@ -370,7 +476,7 @@ class DocumentController extends Controller
         $user = Auth::user();
         $query = Document::where('status', 'completed_archive');
 
-        if (in_array($user->role, ['staff', 'department'])) {
+        if (in_array($user->role, ['vdg', 'staff', 'department'])) {
             $query->where('assigned_department_id', $user->department_id);
         }
 
@@ -420,7 +526,8 @@ class DocumentController extends Controller
                 break;
 
             case 'vdg':
-                $query->where('status', 'pending_vdg_approval');
+                $query->where('assigned_department_id', $user->department_id)
+                      ->where('status', 'pending_vdg_approval');
                 break;
         }
 
@@ -487,13 +594,8 @@ class DocumentController extends Controller
     public function downloadFile($id)
     {
         $document = Document::findOrFail($id);
-        $filePath = $document->file_path;
 
-        if (!$filePath) {
-            return response()->json(['message' => 'No file attached.'], 404);
-        }
-
-        $absolutePath = $this->resolveAbsolutePath($filePath);
+        $absolutePath = $this->resolveAbsolutePath($document->file_path);
 
         if (!$absolutePath) {
             return response()->json(['message' => 'Original file not found on server storage.'], 404);
@@ -554,5 +656,42 @@ class DocumentController extends Controller
             'Content-Length'    => filesize($absolutePath),
             'X-Accel-Buffering' => 'no',
         ]);
+    }
+
+    private function burnSignatureIntoPdf($filePath, $signaturePath, $x, $y, $width, $height, $page)
+    {
+        $absoluteFilePath = $this->resolveAbsolutePath($filePath);
+        $absoluteSigPath = $this->resolveAbsolutePath($signaturePath);
+
+        if (!$absoluteFilePath || !$absoluteSigPath || !file_exists($absoluteFilePath) || !file_exists($absoluteSigPath)) {
+            return false;
+        }
+
+        if (strtolower(pathinfo($absoluteFilePath, PATHINFO_EXTENSION)) !== 'pdf') {
+            return false;
+        }
+
+        try {
+            $pdf = new \Setasign\Fpdi\Fpdi();
+            $pageCount = $pdf->setSourceFile($absoluteFilePath);
+
+            for ($pageNo = 1; $pageNo <= $pageCount; $pageNo++) {
+                $size = $pdf->getTemplateSize($pdf->importPage($pageNo));
+                $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
+                
+                $templateId = $pdf->importPage($pageNo);
+                $pdf->useTemplate($templateId);
+
+                if ($pageNo == $page) {
+                    $pdf->Image($absoluteSigPath, $x, $y, $width, $height);
+                }
+            }
+
+            $pdf->Output($absoluteFilePath, 'F');
+            return true;
+        } catch (\Exception $e) {
+            \Log::error('PDF signature burn failed: ' . $e->getMessage());
+            return false;
+        }
     }
 }

@@ -210,12 +210,14 @@ class DatabaseSeeder extends Seeder
         ];
 
         foreach ($sampleDocs as $index => $doc) {
+            $hasReport = in_array($doc['status'], ['pending_vdg_approval', 'pending_dg_approval', 'dg_signed', 'completed_archive']);
             Document::create([
                 'uploaded_by_user_id' => $fileOfficer->id,
                 'assigned_department_id' => $doc['assigned_department_id'],
                 'control_no' => 'DOC-20260608-' . Str::upper(Str::random(4)) . ($index + 1),
                 'title' => $doc['title'],
                 'file_path' => 'documents/seed_test_file_' . ($index + 1) . '.pdf',
+                'report_path' => $hasReport ? 'reports/seed_report_file_' . ($index + 1) . '.pdf' : null,
                 'file_dept_comment' => $doc['comment'],
                 'status' => $doc['status'],
                 'created_at' => now()->subHours(10 - $index),
