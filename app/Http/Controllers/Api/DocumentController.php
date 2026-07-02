@@ -654,7 +654,7 @@ class DocumentController extends Controller
         }
 
         try {
-            $newPdf = new \Setasign\Fpdi\Fpdi();
+            $newPdf = new \setasign\Fpdi\Fpdi();
 
             foreach ($pdfFiles as $filePath) {
                 if (strtolower(pathinfo($filePath, PATHINFO_EXTENSION)) !== 'pdf') {
@@ -795,7 +795,7 @@ class DocumentController extends Controller
         }
 
         try {
-            $pdf = new \Setasign\Fpdi\Fpdi();
+            $pdf = new \setasign\Fpdi\Fpdi();
             $pageCount = $pdf->setSourceFile($absoluteFilePath);
 
             for ($pageNo = 1; $pageNo <= $pageCount; $pageNo++) {
@@ -846,7 +846,7 @@ class DocumentController extends Controller
             $tempPath = storage_path('app/temp_sig_' . $document->id . '_' . time() . '.pdf');
             file_put_contents($tempPath, $signaturePageOutput);
 
-            $fpdi = new \Setasign\Fpdi\Fpdi();
+            $fpdi = new \setasign\Fpdi\Fpdi();
             $pageCount = $fpdi->setSourceFile($absoluteFilePath);
 
             $pagesToCopy = $pageCount;
@@ -854,7 +854,7 @@ class DocumentController extends Controller
                 $pagesToCopy = max(1, $pageCount - 1);
             }
 
-            $newPdf = new \Setasign\Fpdi\Fpdi();
+            $newPdf = new \setasign\Fpdi\Fpdi();
 
             for ($pageNo = 1; $pageNo <= $pagesToCopy; $pageNo++) {
                 $newPdf->setSourceFile($absoluteFilePath);
