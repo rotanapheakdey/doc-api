@@ -125,7 +125,7 @@ class DocumentController extends Controller
 
         // Fetch the assigned department details and build verification PDF
         $dept = \App\Models\Department::findOrFail($request->assigned_department_id);
-        $signaturePath = $user->signature ? public_path('storage/' . $user->signature) : null;
+        $signaturePath = $user->signature ? storage_path('app/public/' . $user->signature) : null;
 
         $pdfData = [
             'date' => now()->format('F j, Y, g:i a'),
@@ -293,14 +293,6 @@ class DocumentController extends Controller
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
-        $request->validate([
-            'x' => 'nullable|numeric',
-            'y' => 'nullable|numeric',
-            'width' => 'nullable|numeric',
-            'height' => 'nullable|numeric',
-            'page' => 'nullable|integer',
-        ]);
-
         $document = Document::findOrFail($id);
 
         if ($document->status !== 'pending_vdg_approval') {
@@ -311,22 +303,13 @@ class DocumentController extends Controller
             return response()->json(['message' => 'No report file attached to sign.'], 422);
         }
 
-        if ($request->has(['x', 'y', 'page', 'width', 'height'])) {
-            if (!$user->signature) {
-                return response()->json(['message' => 'Please register your signature in your profile first.'], 422);
-            }
-            $burned = $this->burnSignatureIntoPdf(
-                $document->report_path,
-                $user->signature,
-                $request->x,
-                $request->y,
-                $request->width,
-                $request->height,
-                $request->page
-            );
-            if (!$burned) {
-                return response()->json(['message' => 'Failed to apply signature to PDF.'], 500);
-            }
+        if (!$user->signature) {
+            return response()->json(['message' => 'Please register your signature in your profile first.'], 422);
+        }
+
+        $appended = $this->appendSignaturePage($document, $user, now(), null, null);
+        if (!$appended) {
+            return response()->json(['message' => 'Failed to apply signature page to report PDF.'], 500);
         }
 
         $document->update([
@@ -359,14 +342,6 @@ class DocumentController extends Controller
             return response()->json(['message' => 'Unauthorized.'], 403);
         }
 
-        $request->validate([
-            'x' => 'nullable|numeric',
-            'y' => 'nullable|numeric',
-            'width' => 'nullable|numeric',
-            'height' => 'nullable|numeric',
-            'page' => 'nullable|integer',
-        ]);
-
         $document = Document::findOrFail($id);
 
         if ($document->status !== 'pending_dg_approval') {
@@ -377,22 +352,19 @@ class DocumentController extends Controller
             return response()->json(['message' => 'No report file attached to sign.'], 422);
         }
 
-        if ($request->has(['x', 'y', 'page', 'width', 'height'])) {
-            if (!$user->signature) {
-                return response()->json(['message' => 'Please register your signature in your profile first.'], 422);
-            }
-            $burned = $this->burnSignatureIntoPdf(
-                $document->report_path,
-                $user->signature,
-                $request->x,
-                $request->y,
-                $request->width,
-                $request->height,
-                $request->page
-            );
-            if (!$burned) {
-                return response()->json(['message' => 'Failed to apply signature to PDF.'], 500);
-            }
+        if (!$user->signature) {
+            return response()->json(['message' => 'Please register your signature in your profile first.'], 422);
+        }
+
+        $vdgLog = AuditLog::where('document_id', $document->id)
+            ->where('action', 'vdg_signed')
+            ->first();
+        $vdgUser = $vdgLog ? \App\Models\User::find($vdgLog->user_id) : null;
+        $vdgSignedAt = $vdgLog ? $vdgLog->created_at : null;
+
+        $appended = $this->appendSignaturePage($document, $vdgUser, $vdgSignedAt, $user, now());
+        if (!$appended) {
+            return response()->json(['message' => 'Failed to apply final signature page to report PDF.'], 500);
         }
 
         $document->update([
@@ -618,6 +590,11 @@ class DocumentController extends Controller
     {
         $document = Document::findOrFail($id);
 
+        // If the document is archived, combine all PDF segments into one consolidated record!
+        if ($document->status === 'completed_archive') {
+            return $this->downloadMergedArchivePdf($document);
+        }
+
         $absolutePath = $this->resolveAbsolutePath($document->file_path);
 
         if (!$absolutePath) {
@@ -642,6 +619,92 @@ class DocumentController extends Controller
             'Content-Length'    => filesize($absolutePath),
             'X-Accel-Buffering' => 'no',
         ]);
+    }
+
+    private function downloadMergedArchivePdf($document)
+    {
+        $pdfFiles = [];
+
+        // 1. Verification Slip (Directive)
+        if ($document->directive_file_path) {
+            $path = $this->resolveAbsolutePath($document->directive_file_path);
+            if ($path && file_exists($path)) {
+                $pdfFiles[] = $path;
+            }
+        }
+
+        // 2. Original Document
+        if ($document->file_path) {
+            $path = $this->resolveAbsolutePath($document->file_path);
+            if ($path && file_exists($path)) {
+                $pdfFiles[] = $path;
+            }
+        }
+
+        // 3. Action Report
+        if ($document->report_path) {
+            $path = $this->resolveAbsolutePath($document->report_path);
+            if ($path && file_exists($path)) {
+                $pdfFiles[] = $path;
+            }
+        }
+
+        if (empty($pdfFiles)) {
+            return response()->json(['message' => 'No files found to merge.'], 404);
+        }
+
+        try {
+            $newPdf = new \Setasign\Fpdi\Fpdi();
+
+            foreach ($pdfFiles as $filePath) {
+                if (strtolower(pathinfo($filePath, PATHINFO_EXTENSION)) !== 'pdf') {
+                    continue;
+                }
+
+                $pageCount = $newPdf->setSourceFile($filePath);
+                for ($pageNo = 1; $pageNo <= $pageCount; $pageNo++) {
+                    $newPdf->setSourceFile($filePath);
+                    $size = $newPdf->getTemplateSize($newPdf->importPage($pageNo));
+                    $newPdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
+                    $templateId = $newPdf->importPage($pageNo);
+                    $newPdf->useTemplate($templateId);
+                }
+            }
+
+            $tempMergedPath = storage_path('app/temp_merged_' . $document->id . '_' . time() . '.pdf');
+            $newPdf->Output($tempMergedPath, 'F');
+
+            if (ob_get_level()) {
+                ob_end_clean();
+            }
+
+            $mimeType = 'application/pdf';
+
+            return response()->stream(function () use ($tempMergedPath) {
+                $stream = fopen($tempMergedPath, 'rb');
+                while (!feof($stream)) {
+                    echo fread($stream, 8192);
+                    flush();
+                }
+                fclose($stream);
+                
+                if (file_exists($tempMergedPath)) {
+                    unlink($tempMergedPath);
+                }
+            }, 200, [
+                'Content-Type'      => $mimeType,
+                'Content-Length'    => filesize($tempMergedPath),
+                'X-Accel-Buffering' => 'no',
+                'Content-Disposition' => 'attachment; filename="archived_document_' . $document->control_no . '.pdf"',
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Archived PDF merge download failed: ' . $e->getMessage());
+            if (isset($tempMergedPath) && file_exists($tempMergedPath)) {
+                unlink($tempMergedPath);
+            }
+            return response()->json(['message' => 'Failed to generate merged archive PDF: ' . $e->getMessage()], 500);
+        }
     }
 
     /**
@@ -751,6 +814,74 @@ class DocumentController extends Controller
             return true;
         } catch (\Exception $e) {
             \Log::error('PDF signature burn failed: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    private function appendSignaturePage($document, $vdgUser, $vdgSignedAt, $dgUser, $dgSignedAt)
+    {
+        $absoluteFilePath = $this->resolveAbsolutePath($document->report_path);
+        if (!$absoluteFilePath || !file_exists($absoluteFilePath)) {
+            return false;
+        }
+
+        $pdfData = [
+            'document' => $document,
+            'vdg_name' => $vdgUser ? $vdgUser->name : null,
+            'vdg_signature_path' => ($vdgUser && $vdgUser->signature && file_exists(storage_path('app/public/' . $vdgUser->signature))) 
+                ? storage_path('app/public/' . $vdgUser->signature) 
+                : null,
+            'vdg_signed_at' => $vdgSignedAt ? $vdgSignedAt->format('F j, Y, g:i a') : null,
+            'dg_name' => $dgUser ? $dgUser->name : null,
+            'dg_signature_path' => ($dgUser && $dgUser->signature && file_exists(storage_path('app/public/' . $dgUser->signature))) 
+                ? storage_path('app/public/' . $dgUser->signature) 
+                : null,
+            'dg_signed_at' => $dgSignedAt ? $dgSignedAt->format('F j, Y, g:i a') : null,
+        ];
+
+        try {
+            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.report_signature', $pdfData);
+            $signaturePageOutput = $pdf->output();
+            
+            $tempPath = storage_path('app/temp_sig_' . $document->id . '_' . time() . '.pdf');
+            file_put_contents($tempPath, $signaturePageOutput);
+
+            $fpdi = new \Setasign\Fpdi\Fpdi();
+            $pageCount = $fpdi->setSourceFile($absoluteFilePath);
+
+            $pagesToCopy = $pageCount;
+            if ($document->status === 'pending_dg_approval') {
+                $pagesToCopy = max(1, $pageCount - 1);
+            }
+
+            $newPdf = new \Setasign\Fpdi\Fpdi();
+
+            for ($pageNo = 1; $pageNo <= $pagesToCopy; $pageNo++) {
+                $newPdf->setSourceFile($absoluteFilePath);
+                $size = $newPdf->getTemplateSize($newPdf->importPage($pageNo));
+                $newPdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
+                $templateId = $newPdf->importPage($pageNo);
+                $newPdf->useTemplate($templateId);
+            }
+
+            $newPdf->setSourceFile($tempPath);
+            $size = $newPdf->getTemplateSize($newPdf->importPage(1));
+            $newPdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
+            $templateId = $newPdf->importPage(1);
+            $newPdf->useTemplate($templateId);
+
+            $newPdf->Output($absoluteFilePath, 'F');
+
+            if (file_exists($tempPath)) {
+                unlink($tempPath);
+            }
+
+            return true;
+        } catch (\Exception $e) {
+            \Log::error('Failed to append signature page: ' . $e->getMessage());
+            if (isset($tempPath) && file_exists($tempPath)) {
+                unlink($tempPath);
+            }
             return false;
         }
     }
