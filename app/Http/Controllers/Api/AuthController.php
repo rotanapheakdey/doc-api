@@ -33,7 +33,9 @@ class AuthController extends Controller
                 'email' => $user->email,
                 'role' => $user->role,
                 'department_id' => $user->department_id,
-                'department_name' => $user->department?->name
+                'department_name' => $user->department?->name,
+                'avatar_url' => $user->avatar_url,
+                'signature_url' => $user->signature_url
             ]
         ], 200);
     }

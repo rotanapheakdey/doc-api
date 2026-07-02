@@ -123,8 +123,31 @@ class DocumentController extends Controller
             }
         }
 
+        // Fetch the assigned department details and build verification PDF
+        $dept = \App\Models\Department::findOrFail($request->assigned_department_id);
+        $signaturePath = $user->signature ? public_path('storage/' . $user->signature) : null;
+
+        $pdfData = [
+            'date' => now()->format('F j, Y, g:i a'),
+            'department' => $dept->name,
+            'signature_path' => ($signaturePath && file_exists($signaturePath)) ? $signaturePath : null,
+        ];
+
+        $fileName = null;
+        try {
+            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.verification', $pdfData);
+            $fileName = 'directives/directive_' . $document->id . '_' . time() . '.pdf';
+            if (!\Storage::disk('public')->exists('directives')) {
+                \Storage::disk('public')->makeDirectory('directives');
+            }
+            \Storage::disk('public')->put($fileName, $pdf->output());
+        } catch (\Exception $e) {
+            \Log::error('DomPDF directive generation failed: ' . $e->getMessage());
+        }
+
         $document->update([
             'assigned_department_id' => $request->assigned_department_id,
+            'directive_file_path' => $fileName,
             'status' => 'pending_dispatch',
         ]);
 
@@ -430,15 +453,15 @@ class DocumentController extends Controller
     {
         $user = Auth::user();
 
-        if (!in_array($user->role, ['vdg', 'dg'])) {
-            return response()->json(['message' => 'Unauthorized.'], 403);
+        if ($user->role !== 'vdg') {
+            return response()->json(['message' => 'Unauthorized. Only VDG can reject reports.'], 403);
         }
 
         $request->validate(['notes' => 'required|string|max:500']);
         $document = Document::findOrFail($id);
 
-        if (!in_array($document->status, ['pending_vdg_approval', 'pending_dg_approval'])) {
-            return response()->json(['message' => 'Document is not in a review stage.'], 422);
+        if ($document->status !== 'pending_vdg_approval') {
+            return response()->json(['message' => 'Document is not in VDG review stage.'], 422);
         }
 
         $document->update(['status' => 'dg_directed']);
@@ -636,6 +659,43 @@ class DocumentController extends Controller
 
         if (!$absolutePath) {
             return response()->json(['message' => 'Report file not found on server storage.'], 404);
+        }
+
+        if (ob_get_level()) {
+            ob_end_clean();
+        }
+
+        $mimeType = mime_content_type($absolutePath) ?: 'application/pdf';
+
+        return response()->stream(function () use ($absolutePath) {
+            $stream = fopen($absolutePath, 'rb');
+            while (!feof($stream)) {
+                echo fread($stream, 8192);
+                flush();
+            }
+            fclose($stream);
+        }, 200, [
+            'Content-Type'      => $mimeType,
+            'Content-Length'    => filesize($absolutePath),
+            'X-Accel-Buffering' => 'no',
+        ]);
+    }
+
+    /**
+     * 🌟 STREAM DIRECTIVE FILE
+     */
+    public function downloadDirectiveFile($id)
+    {
+        $document = Document::findOrFail($id);
+
+        if (!$document->directive_file_path) {
+            return response()->json(['message' => 'No directive file generated for this document.'], 404);
+        }
+
+        $absolutePath = $this->resolveAbsolutePath($document->directive_file_path);
+
+        if (!$absolutePath) {
+            return response()->json(['message' => 'Directive file not found on server storage.'], 404);
         }
 
         if (ob_get_level()) {

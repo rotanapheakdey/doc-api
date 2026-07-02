@@ -45,10 +45,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/documents/{id}/dg-sign', [DocumentController::class, 'dgFinalSign']);
     // Phase 7: Archive (File Dept)
     Route::post('/documents/{id}/archive', [DocumentController::class, 'archive']);
+    // Reject Pipeline
+    Route::post('/documents/{id}/reject', [DocumentController::class, 'reject']);
 
     Route::get('/documents/archive', [DocumentController::class, 'searchArchive']);
     Route::get('/documents/{id}/download', [DocumentController::class, 'downloadFile']);
     Route::get('/documents/{id}/report/download', [DocumentController::class, 'downloadReportFile']);
+    Route::get('/documents/{id}/directive/download', [DocumentController::class, 'downloadDirectiveFile']);
 
     Route::get('/departments', [DepartmentController::class, 'index']);
     // Logout
