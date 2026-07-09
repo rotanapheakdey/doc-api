@@ -565,6 +565,8 @@ class DocumentController extends Controller
     {
         if (!$filePath) return null;
 
+        clearstatcache();
+
         $path = storage_path('app/public/' . ltrim($filePath, '/\\'));
         if (file_exists($path)) return $path;
 
@@ -597,26 +599,17 @@ class DocumentController extends Controller
 
         $absolutePath = $this->resolveAbsolutePath($document->file_path);
 
-        if (!$absolutePath) {
+        if (!$absolutePath || !file_exists($absolutePath)) {
             return response()->json(['message' => 'Original file not found on server storage.'], 404);
-        }
-
-        if (ob_get_level()) {
-            ob_end_clean();
         }
 
         $mimeType = mime_content_type($absolutePath) ?: 'application/pdf';
 
-        return response()->stream(function () use ($absolutePath) {
-            $stream = fopen($absolutePath, 'rb');
-            while (!feof($stream)) {
-                echo fread($stream, 8192);
-                flush();
-            }
-            fclose($stream);
-        }, 200, [
+        return response(file_get_contents($absolutePath), 200, [
             'Content-Type'      => $mimeType,
-            'Content-Length'    => filesize($absolutePath),
+            'Cache-Control'     => 'no-cache, no-store, must-revalidate',
+            'Pragma'            => 'no-cache',
+            'Expires'           => '0',
             'X-Accel-Buffering' => 'no',
         ]);
     }
@@ -674,26 +667,17 @@ class DocumentController extends Controller
             $tempMergedPath = storage_path('app/temp_merged_' . $document->id . '_' . time() . '.pdf');
             $newPdf->Output($tempMergedPath, 'F');
 
-            if (ob_get_level()) {
-                ob_end_clean();
+            $mimeType = 'application/pdf';
+            $content = file_get_contents($tempMergedPath);
+            if (file_exists($tempMergedPath)) {
+                unlink($tempMergedPath);
             }
 
-            $mimeType = 'application/pdf';
-
-            return response()->stream(function () use ($tempMergedPath) {
-                $stream = fopen($tempMergedPath, 'rb');
-                while (!feof($stream)) {
-                    echo fread($stream, 8192);
-                    flush();
-                }
-                fclose($stream);
-                
-                if (file_exists($tempMergedPath)) {
-                    unlink($tempMergedPath);
-                }
-            }, 200, [
+            return response($content, 200, [
                 'Content-Type'      => $mimeType,
-                'Content-Length'    => filesize($tempMergedPath),
+                'Cache-Control'     => 'no-cache, no-store, must-revalidate',
+                'Pragma'            => 'no-cache',
+                'Expires'           => '0',
                 'X-Accel-Buffering' => 'no',
                 'Content-Disposition' => 'attachment; filename="archived_document_' . $document->control_no . '.pdf"',
             ]);
@@ -720,26 +704,17 @@ class DocumentController extends Controller
 
         $absolutePath = $this->resolveAbsolutePath($document->report_path);
 
-        if (!$absolutePath) {
+        if (!$absolutePath || !file_exists($absolutePath)) {
             return response()->json(['message' => 'Report file not found on server storage.'], 404);
-        }
-
-        if (ob_get_level()) {
-            ob_end_clean();
         }
 
         $mimeType = mime_content_type($absolutePath) ?: 'application/pdf';
 
-        return response()->stream(function () use ($absolutePath) {
-            $stream = fopen($absolutePath, 'rb');
-            while (!feof($stream)) {
-                echo fread($stream, 8192);
-                flush();
-            }
-            fclose($stream);
-        }, 200, [
+        return response(file_get_contents($absolutePath), 200, [
             'Content-Type'      => $mimeType,
-            'Content-Length'    => filesize($absolutePath),
+            'Cache-Control'     => 'no-cache, no-store, must-revalidate',
+            'Pragma'            => 'no-cache',
+            'Expires'           => '0',
             'X-Accel-Buffering' => 'no',
         ]);
     }
@@ -757,26 +732,17 @@ class DocumentController extends Controller
 
         $absolutePath = $this->resolveAbsolutePath($document->directive_file_path);
 
-        if (!$absolutePath) {
+        if (!$absolutePath || !file_exists($absolutePath)) {
             return response()->json(['message' => 'Directive file not found on server storage.'], 404);
-        }
-
-        if (ob_get_level()) {
-            ob_end_clean();
         }
 
         $mimeType = mime_content_type($absolutePath) ?: 'application/pdf';
 
-        return response()->stream(function () use ($absolutePath) {
-            $stream = fopen($absolutePath, 'rb');
-            while (!feof($stream)) {
-                echo fread($stream, 8192);
-                flush();
-            }
-            fclose($stream);
-        }, 200, [
+        return response(file_get_contents($absolutePath), 200, [
             'Content-Type'      => $mimeType,
-            'Content-Length'    => filesize($absolutePath),
+            'Cache-Control'     => 'no-cache, no-store, must-revalidate',
+            'Pragma'            => 'no-cache',
+            'Expires'           => '0',
             'X-Accel-Buffering' => 'no',
         ]);
     }
