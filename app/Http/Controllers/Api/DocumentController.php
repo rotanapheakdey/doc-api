@@ -6,37 +6,47 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Document;
 use App\Models\AuditLog;
+use App\Models\Department;
+use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 
 class DocumentController extends Controller
 {
-    // PHASE 1: THE FRONT ENTRY DESK
+    // ==========================================
+    // PHASE 1: THE FRONT ENTRY DESK (FILE DEPT)
+    // ==========================================
+
+    /**
+     * List all documents accessible by the authenticated user.
+     */
+    public function index()
+    {
+        $user = Auth::user();
+
+        // DG and File Dept have global visibility
+        if (in_array($user->role, ['dg', 'file_dept'])) {
+            $documents = Document::with(['uploader:id,name', 'department:id,name'])
+                ->orderBy('created_at', 'desc')
+                ->get();
+        } else {
+            // Department staff and VDG only see their department's documents
+            $documents = Document::with(['uploader:id,name', 'department:id,name'])
+                ->where('assigned_department_id', $user->department_id)
+                ->orderBy('created_at', 'desc')
+                ->get();
+        }
+
+        return response()->json([
+            'documents' => $documents
+        ], 200);
+    }
 
     /**
      * 1. UPLOAD A NEW DOCUMENT (Restricted to File Dept)
+     * Target department is pre-selected by File Dept upfront.
      */
-    public function index()
-{
-    $user = Auth::user();
-
-    // DG and File Dept can see all
-    if (in_array($user->role, ['dg', 'file_dept'])) {
-        $documents = Document::with(['uploader:id,name', 'department:id,name'])
-            ->orderBy('created_at', 'desc')
-            ->get();
-    } else {
-        // Others only see their department's documents
-        $documents = Document::with(['uploader:id,name', 'department:id,name'])
-            ->where('assigned_department_id', $user->department_id)
-            ->orderBy('created_at', 'desc')
-            ->get();
-    }
-
-    return response()->json([
-        'documents' => $documents
-    ], 200);
-}
     public function store(Request $request)
     {
         $user = Auth::user();
@@ -47,6 +57,7 @@ class DocumentController extends Controller
 
         $request->validate([
             'title' => 'required|string|max:255',
+            'assigned_department_id' => 'required|exists:departments,id',
             'file' => 'required|file|mimes:pdf,doc,docx|max:10240', // 10MB max
             'comment' => 'nullable|string'
         ]);
@@ -56,41 +67,49 @@ class DocumentController extends Controller
 
         $document = Document::create([
             'uploaded_by_user_id' => $user->id,
+            'assigned_department_id' => $request->assigned_department_id,
             'control_no' => $controlNo,
             'title' => $request->title,
             'file_path' => $path,
             'file_dept_comment' => $request->comment,
             'status' => 'pending_dg_init',
+            'is_urgent' => false,
+            'urgent_reason' => null,
         ]);
 
         AuditLog::create([
             'user_id' => $user->id,
             'document_id' => $document->id,
             'action' => 'uploaded',
-            'notes' => 'Document scanned and uploaded into the system.'
+            'notes' => 'Document scanned and uploaded by File Dept with suggested Department #' . $request->assigned_department_id . '.'
         ]);
 
+        $document->load(['uploader:id,name', 'department:id,name']);
+
         return response()->json([
-            'message' => 'Document uploaded successfully!',
+            'message' => 'Document uploaded successfully and queued for DG review!',
             'document' => $document
         ], 201);
     }
 
-    // PHASE 2: THE EXECUTIVE OFFICE
+    // ==========================================
+    // PHASE 2: THE EXECUTIVE OFFICE (DG DIRECT)
+    // ==========================================
 
     /**
-     * 2. DG ASSIGN (Routes document back to File Dept for check/dispatch)
+     * 2. DG ASSIGN & AUTO-DISPATCH
+     * Confirms department, generates directive, burns signature, and auto-dispatches straight to dg_directed.
      */
     public function direct(Request $request, $id)
     {
         $user = Auth::user();
 
         if ($user->role !== 'dg') {
-            return response()->json(['message' => 'Unauthorized. Only DG can assign departments.'], 403);
+            return response()->json(['message' => 'Unauthorized. Only DG can endorse documents.'], 403);
         }
 
         $request->validate([
-            'assigned_department_id' => 'required|exists:departments,id',
+            'assigned_department_id' => 'nullable|exists:departments,id',
             'dg_note' => 'nullable|string|max:500',
             'x' => 'nullable|numeric',
             'y' => 'nullable|numeric',
@@ -103,6 +122,11 @@ class DocumentController extends Controller
 
         if ($document->status !== 'pending_dg_init') {
             return response()->json(['message' => 'Document is not in initiation phase.'], 422);
+        }
+
+        $targetDeptId = $request->assigned_department_id ?? $document->assigned_department_id;
+        if (!$targetDeptId) {
+            return response()->json(['message' => 'Target department must be specified.'], 422);
         }
 
         if ($request->has(['x', 'y', 'page', 'width', 'height'])) {
@@ -124,7 +148,7 @@ class DocumentController extends Controller
         }
 
         // Fetch the assigned department details and build verification PDF
-        $dept = \App\Models\Department::findOrFail($request->assigned_department_id);
+        $dept = Department::findOrFail($targetDeptId);
         $signaturePath = $user->signature ? storage_path('app/public/' . $user->signature) : null;
 
         $pdfData = [
@@ -137,39 +161,43 @@ class DocumentController extends Controller
         try {
             $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.verification', $pdfData);
             $fileName = 'directives/directive_' . $document->id . '_' . time() . '.pdf';
-            if (!\Storage::disk('public')->exists('directives')) {
-                \Storage::disk('public')->makeDirectory('directives');
+            if (!Storage::disk('public')->exists('directives')) {
+                Storage::disk('public')->makeDirectory('directives');
             }
-            \Storage::disk('public')->put($fileName, $pdf->output());
+            Storage::disk('public')->put($fileName, $pdf->output());
         } catch (\Exception $e) {
-            \Log::error('DomPDF directive generation failed: ' . $e->getMessage());
+            Log::error('DomPDF directive generation failed: ' . $e->getMessage());
         }
 
+        // AUTO-DISPATCH: Directly transitions to dg_directed (bypasses manual file_dept dispatch)
         $document->update([
-            'assigned_department_id' => $request->assigned_department_id,
+            'assigned_department_id' => $targetDeptId,
             'directive_file_path' => $fileName,
-            'status' => 'pending_dispatch',
+            'dg_note' => $request->dg_note,
+            'status' => 'dg_directed',
         ]);
 
         AuditLog::create([
             'user_id' => $user->id,
             'document_id' => $document->id,
             'action' => 'assigned',
-            'notes' => 'DG assigned file to Department #' . $request->assigned_department_id . '. Executive Note: ' . ($request->dg_note ?? 'None')
+            'notes' => 'DG endorsed & auto-dispatched file directly to Department: ' . $dept->name . '. Executive Note: ' . ($request->dg_note ?? 'None')
         ]);
 
         $document->load(['uploader:id,name', 'department:id,name']);
 
         return response()->json([
-            'message' => 'Document assigned. Sent back to File Department for final dispatch.',
+            'message' => 'Document endorsed and auto-dispatched to department inbox successfully!',
             'document' => $document
         ], 200);
     }
 
-    // PHASE 3: RETURN TO FRONT DESK FOR DISPATCH
+    // ==========================================
+    // PHASE 3: COMPATIBILITY DISPATCH (OPTIONAL)
+    // ==========================================
 
     /**
-     * 3. DISPATCH DOCUMENT (File Dept approves DG assignment and sends to VDG)
+     * 3. DISPATCH DOCUMENT (Preserved for backward compatibility)
      */
     public function dispatch(Request $request, $id)
     {
@@ -234,10 +262,15 @@ class DocumentController extends Controller
         ], 200);
     }
 
-    // PHASE 4 & 5: DEPARTMENT PROCESSING & SIGNING
+    // ====================================================
+    // PHASE 4: TASK EXECUTION & REPORT (STAFF / DEPT)
+    // ====================================================
 
     /**
-     * 4. UPLOAD ACTION REPORT (Department VDG uploads the finished work/report)
+     * 4. UPLOAD ACTION REPORT
+     * Supports:
+     * - Option A (Standard): Routes to VDG (pending_vdg_approval)
+     * - Option B (Urgent): Bypasses VDG straight to DG (pending_dg_approval)
      */
     public function uploadReport(Request $request, $id)
     {
@@ -249,6 +282,8 @@ class DocumentController extends Controller
 
         $request->validate([
             'report_file' => 'required|file|mimes:pdf,doc,docx|max:10240',
+            'is_urgent' => 'nullable|boolean',
+            'urgent_reason' => 'required_if:is_urgent,true,1|nullable|string|max:500',
         ]);
 
         $document = Document::findOrFail($id);
@@ -262,41 +297,62 @@ class DocumentController extends Controller
         }
 
         $reportPath = $request->file('report_file')->store('reports', 'public');
+        $isUrgent = filter_var($request->input('is_urgent'), FILTER_VALIDATE_BOOLEAN);
+        $urgentReason = $isUrgent ? $request->input('urgent_reason') : null;
 
-        // 🌟 FIX: Use report_path column to keep original file_path safe!
+        // Dynamic Branching:
+        // Option B (Urgent) -> pending_dg_approval
+        // Option A (Standard) -> pending_vdg_approval
+        $targetStatus = $isUrgent ? 'pending_dg_approval' : 'pending_vdg_approval';
+
         $document->update([
-            'status' => 'pending_vdg_approval',
-            'report_path' => $reportPath
+            'status' => $targetStatus,
+            'report_path' => $reportPath,
+            'is_urgent' => $isUrgent,
+            'urgent_reason' => $urgentReason,
+            'return_reason' => null,
+            'returned_by_role' => null,
         ]);
 
         AuditLog::create([
             'user_id' => $user->id,
             'document_id' => $document->id,
             'action' => 'report_submitted',
-            'notes' => 'Department staff finished execution and uploaded the target action report.'
+            'notes' => $isUrgent
+                ? 'URGENT BYPASS: Fast-tracked directly to Director General (bypassed VDG review). Reason: ' . $urgentReason
+                : 'Department staff completed execution and uploaded action report to VDG.'
         ]);
 
+        $document->load(['uploader:id,name', 'department:id,name']);
+
         return response()->json([
-            'message' => 'Action report uploaded successfully. Sent to VDG for verification.',
+            'message' => $isUrgent
+                ? 'Urgent action report uploaded! Fast-tracked directly to the Director General.'
+                : 'Action report uploaded successfully. Sent to VDG for verification.',
             'document' => $document
         ], 200);
     }
 
+    // ==========================================
+    // PHASE 5: SUPERVISORY REVIEW (VDG)
+    // ==========================================
+
     /**
-     * 5. VDG SIGN OFF (VDG signs the report, sending it up to the top office)
+     * 5. VDG SIGN OFF
+     * Signs the report and forwards it upward to the Director General (pending_dg_approval).
      */
     public function vdgSign(Request $request, $id)
     {
         $user = Auth::user();
 
         if ($user->role !== 'vdg') {
-            return response()->json(['message' => 'Unauthorized.'], 403);
+            return response()->json(['message' => 'Unauthorized. Only VDG can sign.'], 403);
         }
 
         $document = Document::findOrFail($id);
 
         if ($document->status !== 'pending_vdg_approval') {
-            return response()->json(['message' => 'No report found awaiting signature.'], 422);
+            return response()->json(['message' => 'No report found awaiting VDG signature.'], 422);
         }
 
         if (!$document->report_path) {
@@ -307,13 +363,10 @@ class DocumentController extends Controller
             return response()->json(['message' => 'Please register your signature in your profile first.'], 422);
         }
 
-        $appended = $this->appendSignaturePage($document, $user, now(), null, null);
-        if (!$appended) {
-            return response()->json(['message' => 'Failed to apply signature page to report PDF.'], 500);
-        }
-
         $document->update([
-            'status' => 'pending_dg_approval'
+            'status' => 'pending_dg_approval',
+            'return_reason' => null,
+            'returned_by_role' => null,
         ]);
 
         AuditLog::create([
@@ -323,23 +376,115 @@ class DocumentController extends Controller
             'notes' => 'Vice Director General signed off on the report. Routed upwards to the DG.'
         ]);
 
+        $document->load(['uploader:id,name', 'department:id,name']);
+
         return response()->json([
             'message' => 'Document signed by VDG. Routed to the Director General.',
             'document' => $document
         ], 200);
     }
 
-    // PHASE 6 & 7: FINAL EXECUTION & PERMANENT ARCHIVING
+    /**
+     * 5b. RETURN FOR REVISION PIPELINE (VDG & DG)
+     * - VDG: Returns report back 1 step to Department Staff (status reverts to dg_directed).
+     * - DG:
+     *    - If urgent bypass (VDG bypassed): returns report back 1 step to Staff (status reverts to dg_directed).
+     *    - If standard flow (VDG participated): returns document back 1 step to VDG (status reverts to pending_vdg_approval).
+     */
+    public function reject(Request $request, $id)
+    {
+        $user = Auth::user();
+
+        if (!in_array($user->role, ['vdg', 'dg'])) {
+            return response()->json(['message' => 'Unauthorized. Only VDG or DG can return documents for revision.'], 403);
+        }
+
+        $request->validate(['notes' => 'required|string|max:500']);
+        $document = Document::findOrFail($id);
+
+        if ($user->role === 'vdg') {
+            if ($document->status !== 'pending_vdg_approval') {
+                return response()->json(['message' => 'Document is not in VDG review stage.'], 422);
+            }
+
+            $document->update([
+                'status' => 'dg_directed',
+                'return_reason' => $request->notes,
+                'returned_by_role' => 'vdg',
+            ]);
+
+            AuditLog::create([
+                'user_id' => $user->id,
+                'document_id' => $document->id,
+                'action' => 'returned',
+                'notes' => 'RETURNED FOR REVISION BY VDG: ' . $request->notes
+            ]);
+
+            $document->load(['uploader:id,name', 'department:id,name']);
+
+            return response()->json([
+                'message' => 'Document returned to department staff for revision.',
+                'document' => $document
+            ], 200);
+        }
+
+        if ($user->role === 'dg') {
+            if ($document->status !== 'pending_dg_approval') {
+                return response()->json(['message' => 'Document is not in DG final approval stage.'], 422);
+            }
+
+            // Check if VDG was bypassed (urgent fast-track)
+            $vdgLog = AuditLog::where('document_id', $document->id)
+                ->where('action', 'vdg_signed')
+                ->first();
+            $bypassedVdg = ($document->is_urgent && !$vdgLog);
+
+            if ($bypassedVdg) {
+                // Return 1 step back to Staff
+                $targetStatus = 'dg_directed';
+                $targetMessage = 'Document returned to department staff for revision (VDG review was bypassed).';
+            } else {
+                // Return 1 step back to VDG
+                $targetStatus = 'pending_vdg_approval';
+                $targetMessage = 'Document returned to Vice Director General for supervisory revision.';
+            }
+
+            $document->update([
+                'status' => $targetStatus,
+                'return_reason' => $request->notes,
+                'returned_by_role' => 'dg',
+            ]);
+
+            AuditLog::create([
+                'user_id' => $user->id,
+                'document_id' => $document->id,
+                'action' => 'returned',
+                'notes' => 'RETURNED FOR REVISION BY DG: ' . $request->notes
+            ]);
+
+            $document->load(['uploader:id,name', 'department:id,name']);
+
+            return response()->json([
+                'message' => $targetMessage,
+                'document' => $document
+            ], 200);
+        }
+    }
+
+    // ====================================================
+    // PHASE 6 & 7: FINAL EXECUTIVE SIGN & ARCHIVING
+    // ====================================================
 
     /**
-     * 6. DG FINAL SIGN (Director General gives executive sign-off)
+     * 6. DG FINAL SIGN
+     * Executive validation for both VDG-endorsed files and Urgent bypass files.
      */
     public function dgFinalSign(Request $request, $id)
     {
         $user = Auth::user();
 
         if ($user->role !== 'dg') {
-            return response()->json(['message' => 'Unauthorized.'], 403);
+            return response()->json(['message' => 'Unauthorized. Only DG can give final approval.'], 403);
         }
 
         $document = Document::findOrFail($id);
@@ -359,13 +504,7 @@ class DocumentController extends Controller
         $vdgLog = AuditLog::where('document_id', $document->id)
             ->where('action', 'vdg_signed')
             ->first();
-        $vdgUser = $vdgLog ? \App\Models\User::find($vdgLog->user_id) : null;
-        $vdgSignedAt = $vdgLog ? $vdgLog->created_at : null;
-
-        $appended = $this->appendSignaturePage($document, $vdgUser, $vdgSignedAt, $user, now());
-        if (!$appended) {
-            return response()->json(['message' => 'Failed to apply final signature page to report PDF.'], 500);
-        }
+        $bypassedVdg = ($document->is_urgent && !$vdgLog);
 
         $document->update([
             'status' => 'dg_signed'
@@ -375,8 +514,10 @@ class DocumentController extends Controller
             'user_id' => $user->id,
             'document_id' => $document->id,
             'action' => 'dg_signed',
-            'notes' => 'Director General gave final executive signature validation.'
+            'notes' => 'Director General gave final executive signature validation.' . ($bypassedVdg ? ' (Fast-tracked Urgent)' : '')
         ]);
+
+        $document->load(['uploader:id,name', 'department:id,name']);
 
         return response()->json([
             'message' => 'Document officially signed by the DG! Sent to Entry desk for archiving.',
@@ -412,6 +553,8 @@ class DocumentController extends Controller
             'notes' => 'Document file safely vaulted in permanent records registry. Lifecycle closed.'
         ]);
 
+        $document->load(['uploader:id,name', 'department:id,name']);
+
         return response()->json([
             'message' => 'Document successfully locked and archived permanently!',
             'document' => $document
@@ -419,37 +562,7 @@ class DocumentController extends Controller
     }
 
     /**
-     * ✨ ADDED FEATURE: BACKTRACK REJECTION PIPELINE
-     */
-    public function reject(Request $request, $id)
-    {
-        $user = Auth::user();
-
-        if ($user->role !== 'vdg') {
-            return response()->json(['message' => 'Unauthorized. Only VDG can reject reports.'], 403);
-        }
-
-        $request->validate(['notes' => 'required|string|max:500']);
-        $document = Document::findOrFail($id);
-
-        if ($document->status !== 'pending_vdg_approval') {
-            return response()->json(['message' => 'Document is not in VDG review stage.'], 422);
-        }
-
-        $document->update(['status' => 'dg_directed']);
-
-        AuditLog::create([
-            'user_id' => $user->id,
-            'document_id' => $document->id,
-            'action' => 'assigned',
-            'notes' => 'REJECTED BY ' . strtoupper($user->role) . '. Reason: ' . $request->notes
-        ]);
-
-        return response()->json(['message' => 'Document sent back to staff desk for corrections.']);
-    }
-
-    /**
-     * ✨ ADDED FEATURE: DETAILED PROFILE VIEW
+     * Detailed profile view with full history and audit trails.
      */
     public function show($id)
     {
@@ -462,10 +575,20 @@ class DocumentController extends Controller
             }
         }
 
+        // VDG has full access to all documents belonging to their department
+        if ($user->role === 'vdg') {
+            if ($document->assigned_department_id !== $user->department_id) {
+                return response()->json(['message' => 'Access Denied.'], 403);
+            }
+        }
+
         return response()->json($document, 200);
     }
 
+    // ==========================================
     // SEARCH & ARCHIVE VISIBILITY
+    // ==========================================
+
     public function searchArchive(Request $request)
     {
         $user = Auth::user();
@@ -495,10 +618,13 @@ class DocumentController extends Controller
         ], 200);
     }
 
-    // CORE VISIBILITY SYSTEMS (URGENT FEEDS & INBOXES)
+    // ==========================================
+    // CORE VISIBILITY SYSTEMS (FEEDS & INBOXES)
+    // ==========================================
 
     /**
-     * THE SMART URGENT FEED (Changes dynamically based on role tracking)
+     * THE SMART URGENT FEED
+     * Dynamically prioritizes items requiring immediate action by role.
      */
     public function urgentFeed()
     {
@@ -507,26 +633,45 @@ class DocumentController extends Controller
 
         switch ($user->role) {
             case 'dg':
-                $query->whereIn('status', ['pending_dg_init', 'pending_dg_approval']);
+                // DG handles:
+                // 1. Initial endorsements (pending_dg_init)
+                // 2. Final approvals (pending_dg_approval) - Urgent bypass files sorted to top
+                $query->whereIn('status', ['pending_dg_init', 'pending_dg_approval'])
+                      ->orderBy('is_urgent', 'desc')
+                      ->orderBy('created_at', 'asc');
                 break;
 
             case 'file_dept':
-                $query->whereIn('status', ['pending_dispatch', 'dg_signed']);
+                // File dept handles finalized files awaiting archival
+                $query->whereIn('status', ['dg_signed'])
+                      ->orderBy('updated_at', 'desc');
                 break;
 
             case 'department':
             case 'staff':
+                // Staff needs to work on directed files
                 $query->where('assigned_department_id', $user->department_id)
-                      ->where('status', 'dg_directed');
+                      ->where('status', 'dg_directed')
+                      ->orderBy('created_at', 'asc');
                 break;
 
             case 'vdg':
+                // VDG handles pending reviews
+                // AND has situational awareness of urgent bypass files in their department
                 $query->where('assigned_department_id', $user->department_id)
-                      ->where('status', 'pending_vdg_approval');
+                      ->where(function($q) {
+                          $q->where('status', 'pending_vdg_approval')
+                            ->orWhere(function($sub) {
+                                $sub->where('status', 'pending_dg_approval')
+                                    ->where('is_urgent', true);
+                            });
+                      })
+                      ->orderBy('is_urgent', 'desc')
+                      ->orderBy('created_at', 'asc');
                 break;
         }
 
-        $documents = $query->oldest()->get();
+        $documents = $query->with(['uploader:id,name', 'department:id,name'])->get();
 
         return response()->json([
             'role' => $user->role,
@@ -536,7 +681,8 @@ class DocumentController extends Controller
     }
 
     /**
-     * DEPARTMENT INBOX (For VDG to monitor files actively being worked on)
+     * DEPARTMENT INBOX
+     * Active files currently undergoing processing within the department.
      */
     public function departmentInbox(Request $request)
     {
@@ -547,8 +693,9 @@ class DocumentController extends Controller
         }
 
         $documents = Document::where('assigned_department_id', $user->department_id)
-            ->whereIn('status', ['dg_directed', 'pending_vdg_approval'])
-            ->with(['uploader:id,name'])
+            ->whereIn('status', ['dg_directed', 'pending_vdg_approval', 'pending_dg_approval'])
+            ->with(['uploader:id,name', 'department:id,name'])
+            ->orderBy('is_urgent', 'desc')
             ->orderBy('updated_at', 'desc')
             ->get();
 
@@ -560,6 +707,10 @@ class DocumentController extends Controller
             'documents' => $documents
         ], 200);
     }
+
+    // ==========================================
+    // PDF ENGINE & STREAMING HELPERS
+    // ==========================================
 
     private function resolveAbsolutePath($filePath)
     {
@@ -586,13 +737,12 @@ class DocumentController extends Controller
     }
 
     /**
-     * 🌟 FIX: SMART FILE STREAM ENGINE
+     * Streams document file (or merged archive if status is completed_archive).
      */
     public function downloadFile($id)
     {
         $document = Document::findOrFail($id);
 
-        // If the document is archived, combine all PDF segments into one consolidated record!
         if ($document->status === 'completed_archive') {
             return $this->downloadMergedArchivePdf($document);
         }
@@ -634,7 +784,7 @@ class DocumentController extends Controller
             }
         }
 
-        // 3. Action Report
+        // 3. Action Report (Includes appended signature pages)
         if ($document->report_path) {
             $path = $this->resolveAbsolutePath($document->report_path);
             if ($path && file_exists($path)) {
@@ -683,7 +833,7 @@ class DocumentController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            \Log::error('Archived PDF merge download failed: ' . $e->getMessage());
+            Log::error('Archived PDF merge download failed: ' . $e->getMessage());
             if (isset($tempMergedPath) && file_exists($tempMergedPath)) {
                 unlink($tempMergedPath);
             }
@@ -691,9 +841,6 @@ class DocumentController extends Controller
         }
     }
 
-    /**
-     * 🌟 STREAM ACTION REPORT FILE
-     */
     public function downloadReportFile($id)
     {
         $document = Document::findOrFail($id);
@@ -719,9 +866,6 @@ class DocumentController extends Controller
         ]);
     }
 
-    /**
-     * 🌟 STREAM DIRECTIVE FILE
-     */
     public function downloadDirectiveFile($id)
     {
         $document = Document::findOrFail($id);
@@ -740,6 +884,106 @@ class DocumentController extends Controller
 
         return response(file_get_contents($absolutePath), 200, [
             'Content-Type'      => $mimeType,
+            'Cache-Control'     => 'no-cache, no-store, must-revalidate',
+            'Pragma'            => 'no-cache',
+            'Expires'           => '0',
+            'X-Accel-Buffering' => 'no',
+        ]);
+    }
+
+    /**
+     * Download / View VDG Clearance Signature Slip (Standalone 1-Page PDF)
+     */
+    public function downloadVdgSignFile($id)
+    {
+        $document = Document::with('department')->findOrFail($id);
+
+        if ($document->is_urgent) {
+            return response()->json(['message' => 'VDG review was bypassed for this urgent document.'], 404);
+        }
+
+        $vdgLog = AuditLog::where('document_id', $document->id)
+            ->where('action', 'vdg_signed')
+            ->first();
+
+        if (!$vdgLog && !in_array($document->status, ['pending_dg_approval', 'dg_signed', 'completed_archive'])) {
+            return response()->json(['message' => 'Document has not received VDG sign-off yet.'], 404);
+        }
+
+        $vdgUser = $vdgLog ? User::find($vdgLog->user_id) : null;
+        $vdgSignedAt = $vdgLog ? $vdgLog->created_at : null;
+
+        $pdfData = [
+            'document' => $document,
+            'bypassed_vdg' => false,
+            'urgent_reason' => null,
+            'vdg_name' => $vdgUser ? $vdgUser->name : 'Vice Director General',
+            'vdg_signature_path' => ($vdgUser && $vdgUser->signature && file_exists(storage_path('app/public/' . $vdgUser->signature))) 
+                ? storage_path('app/public/' . $vdgUser->signature) 
+                : null,
+            'vdg_signed_at' => $vdgSignedAt ? $vdgSignedAt->format('F j, Y, g:i a') : now()->format('F j, Y, g:i a'),
+            'dg_name' => null,
+            'dg_signature_path' => null,
+            'dg_signed_at' => null,
+        ];
+
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.report_signature', $pdfData);
+        $output = $pdf->output();
+
+        return response($output, 200, [
+            'Content-Type'      => 'application/pdf',
+            'Cache-Control'     => 'no-cache, no-store, must-revalidate',
+            'Pragma'            => 'no-cache',
+            'Expires'           => '0',
+            'X-Accel-Buffering' => 'no',
+        ]);
+    }
+
+    /**
+     * Download / View DG Final Sign-off Certificate (Standalone 1-Page PDF)
+     */
+    public function downloadFinalSignFile($id)
+    {
+        $document = Document::with('department')->findOrFail($id);
+
+        if (!in_array($document->status, ['dg_signed', 'completed_archive'])) {
+            return response()->json(['message' => 'Document has not received final DG approval yet.'], 404);
+        }
+
+        $vdgLog = AuditLog::where('document_id', $document->id)
+            ->where('action', 'vdg_signed')
+            ->first();
+        $vdgUser = $vdgLog ? User::find($vdgLog->user_id) : null;
+        $vdgSignedAt = $vdgLog ? $vdgLog->created_at : null;
+        $bypassedVdg = ($document->is_urgent && !$vdgLog);
+
+        $dgLog = AuditLog::where('document_id', $document->id)
+            ->where('action', 'dg_signed')
+            ->first();
+        $dgUser = $dgLog ? User::find($dgLog->user_id) : Auth::user();
+        $dgSignedAt = $dgLog ? $dgLog->created_at : now();
+
+        $pdfData = [
+            'document' => $document,
+            'bypassed_vdg' => $bypassedVdg,
+            'urgent_reason' => $document->urgent_reason,
+            'vdg_name' => $vdgUser ? $vdgUser->name : null,
+            'vdg_signature_path' => ($vdgUser && $vdgUser->signature && file_exists(storage_path('app/public/' . $vdgUser->signature))) 
+                ? storage_path('app/public/' . $vdgUser->signature) 
+                : null,
+            'vdg_signed_at' => $vdgSignedAt ? $vdgSignedAt->format('F j, Y, g:i a') : null,
+            'dg_name' => $dgUser ? $dgUser->name : 'Director General',
+            'dg_signature_path' => ($dgUser && $dgUser->signature && file_exists(storage_path('app/public/' . $dgUser->signature))) 
+                ? storage_path('app/public/' . $dgUser->signature) 
+                : null,
+            'dg_signed_at' => $dgSignedAt ? $dgSignedAt->format('F j, Y, g:i a') : now()->format('F j, Y, g:i a'),
+        ];
+
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.report_signature', $pdfData);
+        $output = $pdf->output();
+
+        return response($output, 200, [
+            'Content-Type'      => 'application/pdf',
             'Cache-Control'     => 'no-cache, no-store, must-revalidate',
             'Pragma'            => 'no-cache',
             'Expires'           => '0',
@@ -779,12 +1023,12 @@ class DocumentController extends Controller
             $pdf->Output($absoluteFilePath, 'F');
             return true;
         } catch (\Exception $e) {
-            \Log::error('PDF signature burn failed: ' . $e->getMessage());
+            Log::error('PDF signature burn failed: ' . $e->getMessage());
             return false;
         }
     }
 
-    private function appendSignaturePage($document, $vdgUser, $vdgSignedAt, $dgUser, $dgSignedAt)
+    private function appendSignaturePage($document, $vdgUser, $vdgSignedAt, $dgUser, $dgSignedAt, $bypassedVdg = false)
     {
         $absoluteFilePath = $this->resolveAbsolutePath($document->report_path);
         if (!$absoluteFilePath || !file_exists($absoluteFilePath)) {
@@ -793,6 +1037,8 @@ class DocumentController extends Controller
 
         $pdfData = [
             'document' => $document,
+            'bypassed_vdg' => $bypassedVdg,
+            'urgent_reason' => $document->urgent_reason,
             'vdg_name' => $vdgUser ? $vdgUser->name : null,
             'vdg_signature_path' => ($vdgUser && $vdgUser->signature && file_exists(storage_path('app/public/' . $vdgUser->signature))) 
                 ? storage_path('app/public/' . $vdgUser->signature) 
@@ -815,8 +1061,9 @@ class DocumentController extends Controller
             $fpdi = new \setasign\Fpdi\Fpdi();
             $pageCount = $fpdi->setSourceFile($absoluteFilePath);
 
+            // If replacing previous single VDG signature page, copy all pages except last
             $pagesToCopy = $pageCount;
-            if ($document->status === 'pending_dg_approval') {
+            if ($document->status === 'pending_dg_approval' && !$bypassedVdg) {
                 $pagesToCopy = max(1, $pageCount - 1);
             }
 
@@ -844,7 +1091,7 @@ class DocumentController extends Controller
 
             return true;
         } catch (\Exception $e) {
-            \Log::error('Failed to append signature page: ' . $e->getMessage());
+            Log::error('Failed to append signature page: ' . $e->getMessage());
             if (isset($tempPath) && file_exists($tempPath)) {
                 unlink($tempPath);
             }

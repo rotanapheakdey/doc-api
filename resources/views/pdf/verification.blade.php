@@ -171,7 +171,7 @@
         <div class="header">
             @if(file_exists(public_path('images/logo.png')))
                 <div class="logo-container">
-                    <img class="logo-img" src="{{ public_path('images/logo.png') }}" alt="CADT Logo">
+                    <img class="logo-img" src="{{ public_path('images/logo.png') }}" alt="BBU Logo">
                 </div>
             @else
                 <div class="logo-fallback">
@@ -214,7 +214,7 @@
         </div>
 
         <div class="footer-note">
-            This verification slip was automatically generated and signed by the Director General via the CADT Document Management System.
+            This verification slip was automatically generated and signed by the Director General via the BBU Document Management System.
         </div>
     </div>
 </body>

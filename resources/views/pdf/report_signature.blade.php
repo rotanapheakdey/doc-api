@@ -199,7 +199,7 @@
         <div class="header">
             @if(file_exists(public_path('images/logo.png')))
                 <div class="logo-container">
-                    <img class="logo-img" src="{{ public_path('images/logo.png') }}" alt="CADT Logo">
+                    <img class="logo-img" src="{{ public_path('images/logo.png') }}" alt="BBU Logo">
                 </div>
             @else
                 <div class="logo-fallback">
@@ -228,50 +228,85 @@
             </tr>
         </table>
 
-        <div class="section-title">Executive Sign-offs</div>
-        <table class="signatures-table">
-            <tr>
-                <!-- VDG SIGNATURE -->
-                <td class="signature-column">
-                    <div class="signature-card">
-                        <span class="signature-label">Verified &amp; Cleared By</span>
-                        <div class="signature-wrapper">
-                            @if($vdg_signature_path)
-                                <img class="signature-img" src="{{ $vdg_signature_path }}" alt="VDG Signature">
-                            @else
-                                <div class="no-signature">Awaiting Review</div>
-                            @endif
-                        </div>
-                        <div class="signature-line"></div>
-                        <h3 class="signer-title">{{ $vdg_name ?? 'VICE DIRECTOR GENERAL' }}</h3>
-                        <div class="signer-role">Vice Director General</div>
-                        @if($vdg_signed_at)
-                            <div class="timestamp-text">✓ Signed: {{ $vdg_signed_at }}</div>
-                        @endif
-                    </div>
-                </td>
+        <div class="section-title">Executive Sign-off</div>
 
-                <!-- DG SIGNATURE -->
-                <td class="signature-column">
-                    <div class="signature-card">
-                        <span class="signature-label">Executive Approval By</span>
-                        <div class="signature-wrapper">
-                            @if($dg_signature_path)
-                                <img class="signature-img" src="{{ $dg_signature_path }}" alt="DG Signature">
-                            @else
-                                <div class="no-signature" style="color: #d97706;">Awaiting Sign-off</div>
+        @if(!empty($bypassed_vdg))
+            <!-- URGENT FAST-TRACK: ONLY DG SIGNATURE DISPLAYED -->
+            <div style="background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 10px 14px; margin-bottom: 20px; text-align: center;">
+                <span style="color: #b91c1c; font-weight: bold; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">⚡ Urgent Fast-Track Routing (VDG Review Bypassed)</span>
+                @if(!empty($urgent_reason))
+                    <div style="color: #7f1d1d; font-size: 10px; margin-top: 3px; font-style: italic;">Reason: "{{ $urgent_reason }}"</div>
+                @endif
+            </div>
+
+            <table class="signatures-table" style="width: 100%;">
+                <tr>
+                    <td style="width: 100%; text-align: center; padding: 0;">
+                        <div class="signature-card" style="width: 340px; margin: 0 auto; height: 200px;">
+                            <span class="signature-label">Final Executive Approval By</span>
+                            <div class="signature-wrapper">
+                                @if($dg_signature_path)
+                                    <img class="signature-img" src="{{ $dg_signature_path }}" alt="DG Signature">
+                                @else
+                                    <div class="no-signature" style="color: #d97706;">Awaiting Sign-off</div>
+                                @endif
+                            </div>
+                            <div class="signature-line"></div>
+                            <h3 class="signer-title">{{ $dg_name ?? 'DIRECTOR GENERAL' }}</h3>
+                            <div class="signer-role">Director General</div>
+                            @if($dg_signed_at)
+                                <div class="timestamp-text" style="color: #16a34a;">✓ Approved: {{ $dg_signed_at }}</div>
                             @endif
                         </div>
-                        <div class="signature-line"></div>
-                        <h3 class="signer-title">{{ $dg_name ?? 'DIRECTOR GENERAL' }}</h3>
-                        <div class="signer-role">Director General</div>
-                        @if($dg_signed_at)
-                            <div class="timestamp-text" style="color: #16a34a;">✓ Approved: {{ $dg_signed_at }}</div>
-                        @endif
-                    </div>
-                </td>
-            </tr>
-        </table>
+                    </td>
+                </tr>
+            </table>
+        @else
+            <!-- STANDARD FLOW: BOTH VDG AND DG SIGNATURES DISPLAYED -->
+            <table class="signatures-table">
+                <tr>
+                    <!-- VDG SIGNATURE -->
+                    <td class="signature-column">
+                        <div class="signature-card">
+                            <span class="signature-label">Verified &amp; Cleared By</span>
+                            <div class="signature-wrapper">
+                                @if($vdg_signature_path)
+                                    <img class="signature-img" src="{{ $vdg_signature_path }}" alt="VDG Signature">
+                                @else
+                                    <div class="no-signature">Awaiting Review</div>
+                                @endif
+                            </div>
+                            <div class="signature-line"></div>
+                            <h3 class="signer-title">{{ $vdg_name ?? 'VICE DIRECTOR GENERAL' }}</h3>
+                            <div class="signer-role">Vice Director General</div>
+                            @if($vdg_signed_at)
+                                <div class="timestamp-text">✓ Signed: {{ $vdg_signed_at }}</div>
+                            @endif
+                        </div>
+                    </td>
+
+                    <!-- DG SIGNATURE -->
+                    <td class="signature-column">
+                        <div class="signature-card">
+                            <span class="signature-label">Executive Approval By</span>
+                            <div class="signature-wrapper">
+                                @if($dg_signature_path)
+                                    <img class="signature-img" src="{{ $dg_signature_path }}" alt="DG Signature">
+                                @else
+                                    <div class="no-signature" style="color: #d97706;">Awaiting Sign-off</div>
+                                @endif
+                            </div>
+                            <div class="signature-line"></div>
+                            <h3 class="signer-title">{{ $dg_name ?? 'DIRECTOR GENERAL' }}</h3>
+                            <div class="signer-role">Director General</div>
+                            @if($dg_signed_at)
+                                <div class="timestamp-text" style="color: #16a34a;">✓ Approved: {{ $dg_signed_at }}</div>
+                            @endif
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        @endif
 
         @if($dg_signed_at)
             <div class="status-badge">
@@ -284,7 +319,7 @@
         @endif
 
         <div class="footer-note">
-            This verification annex was dynamically appended to the report document. All signatures are digitally logged, verified, and secured under the CADT Document Management System.
+            This official signature verification annex is issued and secured under the BBU Document Management System.
         </div>
     </div>
 </body>

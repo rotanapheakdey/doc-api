@@ -20,6 +20,7 @@ class DatabaseSeeder extends Seeder
             'password' => Hash::make('password123'),
             'role' => 'dg',
             'department_id' => null,
+            'signature' => 'signatures/5pJ4EZJllrmEhuPsxBHXNo4yFT7dQ7WLXTv9KufV.png',
         ]);
 
         $fileOfficer = User::create([
@@ -60,6 +61,7 @@ class DatabaseSeeder extends Seeder
                 'password' => Hash::make('password123'),
                 'role' => 'vdg',
                 'department_id' => $dept->id,
+                'signature' => 'signatures/NIYeZ6kazv1I42xh4w61BzbTZzf0r54BQpcMLno0.png',
             ]);
 
             // The Maker: Staff Account
@@ -80,37 +82,44 @@ class DatabaseSeeder extends Seeder
             // ---------------------------------------------------------
             [
                 'title' => 'Q3 National Budget Framework Request',
-                'status' => 'pending_dg_init', 'assigned_department_id' => null,
-                'comment' => 'Urgent clearance requested.',
+                'status' => 'pending_dg_init', 'assigned_department_id' => $deptIds['FIN'],
+                'comment' => 'Pre-assigned to Finance by File Dept for DG endorsement.',
+                'is_urgent' => false,
             ],
             [
                 'title' => 'Ministry Vehicle Fleet Registration Renewal',
-                'status' => 'pending_dg_init', 'assigned_department_id' => null,
+                'status' => 'pending_dg_init', 'assigned_department_id' => $deptIds['ADM'],
                 'comment' => 'Includes updated insurance policies for 2026.',
+                'is_urgent' => false,
             ],
             [
                 'title' => 'International Press Credential Guidelines',
-                'status' => 'pending_dg_init', 'assigned_department_id' => null,
+                'status' => 'pending_dg_init', 'assigned_department_id' => $deptIds['GDIB'],
                 'comment' => 'New directive from the foreign affairs liaison.',
+                'is_urgent' => false,
             ],
 
             // ---------------------------------------------------------
-            // PHASE 2: pending_dispatch (File Dept needs to Dispatch)
+            // PHASE 2 & 4 (Urgent Bypass): Auto-dispatched & Fast-tracked
             // ---------------------------------------------------------
             [
-                'title' => 'Server Equipment Procurement Memo',
-                'status' => 'pending_dispatch', 'assigned_department_id' => $deptIds['DDA'],
-                'comment' => 'DG Note: Verify specs before sending to tech.',
+                'title' => 'Emergency Network Fiber Cut Restoration',
+                'status' => 'pending_dg_approval', 'assigned_department_id' => $deptIds['DDA'],
+                'comment' => 'Critical infrastructure incident report.',
+                'is_urgent' => true,
+                'urgent_reason' => 'National network backbone affected. Bypassed VDG for immediate DG sign-off.',
             ],
             [
                 'title' => 'Quarterly Payroll Adjustment Report',
-                'status' => 'pending_dispatch', 'assigned_department_id' => $deptIds['FIN'],
-                'comment' => 'DG Note: Please cross-check with HR allowances.',
+                'status' => 'dg_directed', 'assigned_department_id' => $deptIds['FIN'],
+                'comment' => 'DG approved and auto-dispatched to department.',
+                'is_urgent' => false,
             ],
             [
                 'title' => 'New Hire Orientation Schedule',
-                'status' => 'pending_dispatch', 'assigned_department_id' => $deptIds['HR'],
-                'comment' => 'DG Note: Approved, prepare the orientation packets.',
+                'status' => 'dg_directed', 'assigned_department_id' => $deptIds['HR'],
+                'comment' => 'Auto-routed directly to HR desk.',
+                'is_urgent' => false,
             ],
 
             // ---------------------------------------------------------
@@ -220,6 +229,8 @@ class DatabaseSeeder extends Seeder
                 'report_path' => $hasReport ? 'reports/seed_report_file_' . ($index + 1) . '.pdf' : null,
                 'file_dept_comment' => $doc['comment'],
                 'status' => $doc['status'],
+                'is_urgent' => $doc['is_urgent'] ?? false,
+                'urgent_reason' => $doc['urgent_reason'] ?? null,
                 'created_at' => now()->subHours(10 - $index),
                 'updated_at' => now()->subHours(10 - $index),
             ]);

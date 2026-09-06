@@ -1,5 +1,5 @@
-﻿# 🏛️ CADT Digital Document Workflow & Tracking System (Doc-API)
-> **Academic Project — CADT Sarona Final Assignment**  
+# 🏛️ BBU Digital Document Workflow & Tracking System (Doc-API)
+> **Academic Project — BBU University Sarona Final Assignment**  
 > *A Secure, Role-Based Governmental Document Routing, Approval, and Digital Signing Platform.*
 
 ---
@@ -7,20 +7,19 @@
 ## 📌 1. Project Overview & Problem Statement
 
 ### 🎯 Objective
-In traditional ministerial and organizational administration, paper documents suffer from:
-- ⏳ **Slow physical dispatch and routing bottlenecks**
-- 🔍 **Lack of real-time visibility** into who currently holds a pending document
-- ⚠️ **High risk of document loss or tampering**
-- ❌ **No auditable log** of when decisions and signatures were executed
+In traditional administrative governance, paper documents suffer from:
+- ⏳ **Slow physical dispatch and administrative routing bottlenecks**
+- 🔍 **Lack of real-time transparency** into who currently holds a pending file
+- ⚠️ **High risk of lost, duplicated, or tampered physical documents**
+- ❌ **No auditable log** of when executive decisions and signatures were executed
 
-**Doc-API** solves this by establishing a strict, **7-Phase State Machine** that mirrors official administrative governance workflows (File Entry Desk -> Director General -> Dispatch -> Line Departments -> Vice Director General -> Final Executive Sign-off -> Vault Archiving).
-
-### 🛠️ Core Capabilities
-- **Strict Role-Based Access Control (RBAC):** Multi-tiered hierarchy (`file_dept`, `dg`, `vdg`, `department`, `staff`).
-- **Dynamic PDF Digital Stamping & Watermarking:** Merges signatures, directive sheets, and action reports via FPDI & DomPDF.
-- **Bi-Directional Rejection & Correction Pipeline:** Allows supervisors to reject substandard reports back to staff.
-- **Immutable Audit Logging:** Every transition is recorded with actor ID, timestamp, and notes.
-- **Omni-Channel Client Ready:** Tailored for Flutter Mobile frontend and web administrative portals.
+**Doc-API** provides an automated, **Streamlined State Machine** reflecting modern governance workflows:
+1. **Intake & Suggested Routing:** File Desk registers the document and pre-selects the responsible department.
+2. **Executive Directive & Auto-Dispatch:** The Director General endorses the directive and digitally signs; the system **automatically dispatches** the file directly to the assigned department inbox (eliminating manual dispatch bottlenecks).
+3. **Execution & Dynamic Branching:** The department completes the task and submits an Action Report with two options:
+   - **Standard Flow:** Routes to the Vice Director General (VDG) for review.
+   - **⚡ Urgent Fast-Track:** Bypasses VDG supervisory review directly to the Director General (DG) with mandatory audit justification.
+4. **Permanent Archiving:** Final executive sign-off and consolidation into an immutable records vault.
 
 ---
 
@@ -32,29 +31,29 @@ graph TD
     classDef operational fill:#065f46,stroke:#10b981,stroke-width:2px,color:#fff;
     classDef entry fill:#7c2d12,stroke:#f97316,stroke-width:2px,color:#fff;
 
-    DG["👔 Director General (DG)<br/><i>Executive Decisions & Final Sign-off</i>"]:::executive
-    VDG["📑 Vice Director General (VDG)<br/><i>Supervision, Verification & Review</i>"]:::executive
-    FD["📬 File Department (file_dept)<br/><i>Intake Desk, Dispatch & Permanent Archival</i>"]:::entry
-    DEPT["🏢 Department Lead / Staff (department/staff)<br/><i>Action Execution & Report Drafting</i>"]:::operational
+    DG["👔 Director General (DG)<br/><i>Executive Directives & Final Approval</i>"]:::executive
+    VDG["📑 Vice Director General (VDG)<br/><i>Supervisory Review & Verification</i>"]:::executive
+    FD["📬 File Department (file_dept)<br/><i>Intake Desk & Permanent Vaulting</i>"]:::entry
+    DEPT["🏢 Department Lead / Staff (department/staff)<br/><i>Execution & Action Report Drafting</i>"]:::operational
 
-    FD -->|1. Uploads Incoming Doc| DG
-    DG -->|2. Issues Directive| FD
-    FD -->|3. Dispatches Document| DEPT
-    DEPT -->|4. Submits Report| VDG
-    VDG -->|5. Approves & Signs| DG
-    VDG -.->|5b. Rejects for Revision| DEPT
-    DG -->|6. Executive Final Sign| FD
-    FD -->|7. Seals in Permanent Vault| FD
+    FD -->|1. Uploads Doc with Target Dept| DG
+    DG -->|2. Issues Directive & Auto-Dispatches| DEPT
+    DEPT -->|3a. Standard Report Submission| VDG
+    DEPT -.->|3b. ⚡ Urgent Report Bypass| DG
+    VDG -->|4. Approves & Signs| DG
+    VDG -.->|4b. Rejection Loop for Correction| DEPT
+    DG -->|5. Final Executive Sign-off| FD
+    FD -->|6. Permanent Vault Archiving| FD
 ```
 
 ### Role Permissions Matrix
 
-| Role | Upload New Doc | Assign Department | Dispatch | Submit Action Report | VDG Review & Sign | DG Final Sign | Rejection Gate | Permanent Archive |
+| Role | Intake & Pre-assign Dept | Endorse & Auto-Dispatch | Submit Standard Report | Submit ⚡ Urgent Bypass | VDG Review & Sign | Rejection Gate | DG Final Sign | Permanent Vault Archive |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `file_dept` | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| `dg` | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
-| `department` / `staff` | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| `vdg` | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ |
+| `file_dept` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `dg` | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| `department` / `staff` | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| `vdg` | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ |
 
 ---
 
@@ -62,22 +61,23 @@ graph TD
 
 ```mermaid
 stateDiagram-v2
-    [*] --> pending_dg_init: 1. File Dept uploads document with Control No (DOC-YYYYMMDD-XXXX)
+    [*] --> pending_dg_init: 1. File Dept uploads document with Target Dept pre-assigned
     
-    pending_dg_init --> pending_dispatch: 2. DG assigns Target Department & attaches Directive PDF
+    pending_dg_init --> dg_directed: 2. DG signs directive & system AUTO-DISPATCHES directly to Dept Inbox
     
-    pending_dispatch --> dg_directed: 3. File Dept reviews and officially dispatches to Department Inbox
-    
-    dg_directed --> pending_vdg_approval: 4. Department Staff finishes assignment & uploads Action Report
-    
-    state VDG_Review_Stage {
+    state Execution_And_Branching {
+        dg_directed --> pending_vdg_approval: 3a. Staff uploads Report (Standard Mode)
+        dg_directed --> pending_dg_approval: 3b. Staff uploads Report (⚡ Urgent Bypass Mode with Reason)
+    }
+
+    state VDG_Supervisory_Review {
         pending_vdg_approval --> dg_directed: ⚠️ Rejection: VDG sends back to Staff for revisions
-        pending_vdg_approval --> pending_dg_approval: 5. VDG signs & stamps verification page
+        pending_vdg_approval --> pending_dg_approval: 4. VDG signs & stamps verification annex
     }
     
-    pending_dg_approval --> dg_signed: 6. DG applies final executive digital signature
+    pending_dg_approval --> dg_signed: 5. DG validates executive sign-off (handles both standard & urgent)
     
-    dg_signed --> completed_archive: 7. File Dept locks document & merges all PDFs into permanent archive
+    dg_signed --> completed_archive: 6. File Dept merges all PDF assets into permanent immutable vault
     
     completed_archive --> [*]: Lifecycle Closed & Audited
 ```
@@ -97,41 +97,40 @@ sequenceDiagram
     participant Storage as 🗄️ Storage & PDF Engine
     participant DB as 🗃️ Database (MySQL)
 
-    Note over FD,API: Phase 1: Ingestion
-    FD->>API: POST /documents (Upload PDF, title, control_no)
+    Note over FD,API: Phase 1: Intake & Pre-Assignment
+    FD->>API: POST /documents (Upload PDF, title, control_no, assigned_department_id)
     API->>Storage: Store original document PDF
     API->>DB: Insert Document (status: pending_dg_init) + AuditLog
     
-    Note over DG,API: Phase 2: Directive Assignment
+    Note over DG,API: Phase 2: Directive & Auto-Dispatch
     DG->>API: POST /documents/{id}/direct (assigned_department_id, dg_note, sig coords)
-    API->>Storage: Generate Directive PDF (DomPDF) & burn signature
-    API->>DB: Update status to pending_dispatch + AuditLog
+    API->>Storage: Generate Directive PDF (DomPDF) & burn signature (FPDI)
+    API->>DB: Update status to dg_directed (Auto-dispatched!) + AuditLog
     
-    Note over FD,API: Phase 3: Official Dispatch
-    FD->>API: POST /documents/{id}/dispatch (additional_comment)
-    API->>DB: Update status to dg_directed + AuditLog
-    
-    Note over Staff,API: Phase 4: Action Report Upload
-    Staff->>API: POST /documents/{id}/report (Upload report_file)
-    API->>Storage: Store report PDF
-    API->>DB: Update status to pending_vdg_approval + AuditLog
-    
-    Note over VDG,API: Phase 5: Supervisory Review
-    alt Substandard Report (Reject)
-        VDG->>API: POST /documents/{id}/reject (rejection reason)
-        API->>DB: Revert status to dg_directed + AuditLog (REJECTED BY VDG)
-    else Approved & Signed
-        VDG->>API: POST /documents/{id}/vdg-sign
-        API->>Storage: Append VDG signature page onto Report PDF
-        API->>DB: Update status to pending_dg_approval + AuditLog
+    Note over Staff,API: Phase 3: Action Report & Dynamic Branching
+    alt Standard Submission
+        Staff->>API: POST /documents/{id}/report (report_file, is_urgent: false)
+        API->>DB: Update status to pending_vdg_approval + AuditLog
+        Note over VDG,API: Phase 4: VDG Review
+        alt Substandard Work (Reject)
+            VDG->>API: POST /documents/{id}/reject (rejection reason)
+            API->>DB: Revert status to dg_directed + AuditLog (REJECTED BY VDG)
+        else Approved
+            VDG->>API: POST /documents/{id}/vdg-sign
+            API->>Storage: Append VDG signature page onto Report PDF
+            API->>DB: Update status to pending_dg_approval + AuditLog
+        end
+    else ⚡ Urgent Submission (Fast-Track)
+        Staff->>API: POST /documents/{id}/report (report_file, is_urgent: true, urgent_reason)
+        API->>DB: Update status to pending_dg_approval (bypasses VDG) + AuditLog
     end
 
-    Note over DG,API: Phase 6: Final Executive Sign-off
+    Note over DG,API: Phase 5: Final Executive Sign-off
     DG->>API: POST /documents/{id}/dg-sign
-    API->>Storage: Append DG signature onto Report PDF
+    API->>Storage: Append DG signature onto Report PDF (handles standard or urgent bypass)
     API->>DB: Update status to dg_signed + AuditLog
     
-    Note over FD,API: Phase 7: Permanent Archiving
+    Note over FD,API: Phase 6: Permanent Archiving
     FD->>API: POST /documents/{id}/archive
     API->>DB: Update status to completed_archive + AuditLog
     FD->>API: GET /documents/{id}/download (Merged original + directive + signed report)
@@ -170,14 +169,16 @@ erDiagram
     DOCUMENTS {
         bigint id PK
         bigint uploaded_by_user_id FK
-        bigint assigned_department_id FK
+        bigint assigned_department_id FK "Pre-selected on upload"
         string control_no UK "Format: DOC-YYYYMMDD-XXXX"
         string title
         string file_path "Original document PDF"
         string directive_file_path "Generated DG directive PDF"
         string report_path "Staff action report PDF"
         text file_dept_comment
-        enum status "pending_dg_init, pending_dispatch, dg_directed, pending_vdg_approval, pending_dg_approval, dg_signed, completed_archive"
+        enum status "pending_dg_init, dg_directed, pending_vdg_approval, pending_dg_approval, dg_signed, completed_archive"
+        boolean is_urgent "True if fast-tracked directly to DG"
+        text urgent_reason "Mandatory justification for urgent bypass"
         timestamp created_at
         timestamp updated_at
     }
@@ -186,8 +187,8 @@ erDiagram
         bigint id PK
         bigint user_id FK
         bigint document_id FK
-        string action "created, assigned, dispatched, report_submitted, vdg_signed, dg_signed, archived"
-        text notes "Detailed explanation of action"
+        string action "uploaded, assigned, dispatched, report_submitted, vdg_signed, dg_signed, archived"
+        string notes "Detailed audit explanation and justification"
         timestamp created_at
     }
 ```
@@ -210,22 +211,21 @@ erDiagram
 ### 📄 Document Operations Pipeline
 | Phase | Method | URI | Permitted Roles | Description |
 | :---: | :--- | :--- | :--- | :--- |
-| **Phase 1** | `POST` | `/api/documents` | `file_dept` | Ingest initial document (multipart PDF + title + metadata) |
-| **Phase 2** | `POST` | `/api/documents/{id}/direct` | `dg` | Assign department, generate Directive PDF, and burn DG stamp |
-| **Phase 3** | `POST` | `/api/documents/{id}/dispatch` | `file_dept` | Validate directive & officially route doc to line department |
-| **Phase 4** | `POST` | `/api/documents/{id}/report` | `department`, `staff` | Upload completed task action report PDF |
-| **Phase 5** | `POST` | `/api/documents/{id}/vdg-sign` | `vdg` | Review and apply VDG signature to action report |
-| **Fail-Safe**| `POST` | `/api/documents/{id}/reject` | `vdg` | Reject report back to department with feedback notes |
-| **Phase 6** | `POST` | `/api/documents/{id}/dg-sign` | `dg` | Final executive approval and signature endorsement |
-| **Phase 7** | `POST` | `/api/documents/{id}/archive` | `file_dept` | Lock lifecycle into permanent immutable archive |
+| **Phase 1** | `POST` | `/api/documents` | `file_dept` | Ingest initial document (PDF + title + `assigned_department_id`) |
+| **Phase 2** | `POST` | `/api/documents/{id}/direct` | `dg` | Endorse directive & **auto-dispatch** directly to `dg_directed` |
+| **Phase 3** | `POST` | `/api/documents/{id}/report` | `department`, `staff` | Upload action report (Option A: to VDG, or Option B: ⚡ Urgent to DG) |
+| **Phase 4** | `POST` | `/api/documents/{id}/vdg-sign` | `vdg` | Review and apply VDG signature to action report |
+| **Fail-Safe**| `POST` | `/api/documents/{id}/reject` | `vdg` | Reject report back to department staff with feedback notes |
+| **Phase 5** | `POST` | `/api/documents/{id}/dg-sign` | `dg` | Final executive approval (handles standard and urgent bypass) |
+| **Phase 6** | `POST` | `/api/documents/{id}/archive` | `file_dept` | Lock lifecycle into permanent immutable archive |
 
 ---
 
 ### 📊 Visibility Feeds, Search & File Streaming
 | Method | URI | Permitted Roles | Description |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/documents/urgent` | All Authenticated | Documents awaiting urgent action based on current user role |
-| `GET` | `/api/departments/inbox` | `dept`, `staff`, `vdg` | Department-specific actionable incoming queue |
+| `GET` | `/api/documents/urgent` | All Authenticated | Dynamic actionable feed (prioritizes `is_urgent` items for DG/VDG) |
+| `GET` | `/api/departments/inbox` | `dept`, `staff`, `vdg` | Department-specific active processing queue |
 | `GET` | `/api/documents/archive` | All Authenticated | Global (DG/FileDept) or departmental search across archived records |
 | `GET` | `/api/documents/{id}` | Role Authorized | Complete document profile, metadata, and chronological audit trail |
 | `GET` | `/api/documents/{id}/download` | Role Authorized | Dynamic merged multi-part archival PDF stream |
@@ -236,30 +236,7 @@ erDiagram
 
 ## 💻 7. Tech Stack & Engineering Highlights
 
-```
-┌────────────────────────────────────────────────────────┐
-│                   FRONTEND CLIENTS                     │
-│  Flutter Mobile App (iOS / Android)  │  React Admin UI │
-└───────────────────────────┬────────────────────────────┘
-                            │ RESTful JSON / HTTPS
-┌───────────────────────────▼────────────────────────────┐
-│                    LARAVEL 11 BACKEND                  │
-│  • Sanctum Token RBAC Middleware                       │
-│  • 7-Phase State Machine Controller Engine            │
-│  • Event-Sourced Audit Logging Subsystem               │
-└───────────────────────────┬────────────────────────────┘
-                            │
-              ┌─────────────┴─────────────┐
-              ▼                           ▼
-┌───────────────────────────┐ ┌───────────────────────────┐
-│     DATABASE STORAGE      │ │     PDF ENGINE & MERGER   │
-│  MySQL / PostgreSQL       │ │  • FPDI Coordinate Burner │
-│  • Foreign Key Integrity  │ │  • DomPDF Template Engine │
-│  • Indexed Control Nos    │ │  • Dynamic Multi-Doc Join │
-└───────────────────────────┘ └───────────────────────────┘
-```
-
-- **Framework:** Laravel 11.x (PHP 8.2+)
+- **Framework:** Laravel 11.x (PHP 8.2+) running on Docker Sail
 - **Authentication:** Laravel Sanctum (Bearer Token RBAC)
 - **PDF Generation & Manipulation:**
   - `setasign/fpdi` & `setasign/fpdf`: Coordinate-based digital signature embedding directly on PDF bytes.
@@ -268,50 +245,64 @@ erDiagram
 
 ---
 
-## 🎓 8. Quick Presentation Pitch for Your Teacher
+## 🔑 8. Pre-Configured Test Accounts & Credentials
 
-When presenting this project to your professor / supervisor, you can emphasize the following key points:
+All seeded test accounts share the same default password:
+```text
+password123
+```
 
-1. **Academic & Real-World Value:**  
-   *"This project digitizes bureaucratic document workflows, replacing physical paper transit with a secure, 7-phase state machine that mirrors real governmental hierarchies (File Registry -> Director General -> Department Staff -> Vice DG -> Archive)."*
-2. **Key Technical Innovations:**  
-   - **Custom State Machine Pattern:** Strict route-level and database-level validation preventing illegal status jumps.
-   - **Automated Digital Signature & PDF Assembly:** Real-time PDF modification with coordinate signature burning and automated multi-document merging.
-   - **Complete Audit Trail:** Strict accountability with immutable logs for every single action.
-   - **Supervisor Rejection Loop:** Realistic workflow incorporating feedback and revisions before executive sign-off.
-3. **Cross-Platform Readiness:**  
-   *"The backend exposes clean, stateless RESTful endpoints consumed by Flutter mobile and web interfaces."*
+### 👑 Executive & File Desk Accounts
+
+| Name | Role | Email | Password | Responsibilities |
+| :--- | :---: | :--- | :---: | :--- |
+| **Director General** | `dg` | `dg@ministry.gov` | `password123` | Executive decision maker: Issues directives, auto-dispatches files, and applies final executive sign-off. |
+| **File Department Officer** | `file_dept` | `file@ministry.gov` | `password123` | Intake registry officer: Scans & uploads files with pre-assigned departments; vaults & locks finalized archives. |
 
 ---
 
-## 🚀 Setup & Local Execution
+### 🏢 Departmental Accounts (VDG Supervisors & Staff Makers)
 
-### Prerequisites
-- PHP 8.2+ with `gd`, `fileinfo`, `pdo_mysql` extensions
-- Composer 2+
-- MySQL or PostgreSQL database
+Each ministry department has two dedicated accounts:
+- **`vdg` (Vice Director General):** Department supervisor who reviews reports, approves/signs, or triggers the rejection loop.
+- **`staff` (Department Staff):** Operational maker who executes directives and submits action reports (Standard or ⚡ Urgent bypass).
 
-### Installation Steps
+| Department | Dept Code | Role | Email | Password | Authority Scope |
+| :--- | :---: | :---: | :--- | :---: | :--- |
+| **Administration** | `ADM` | `vdg` | `vdg.adm@ministry.gov` | `password123` | VDG Supervisor for Administration |
+| | | `staff` | `staff.adm@ministry.gov` | `password123` | Staff Maker for Administration |
+| **Finance & Accounting** | `FIN` | `vdg` | `vdg.fin@ministry.gov` | `password123` | VDG Supervisor for Finance |
+| | | `staff` | `staff.fin@ministry.gov` | `password123` | Staff Maker for Finance |
+| **Human Resources** | `HR` | `vdg` | `vdg.hr@ministry.gov` | `password123` | VDG Supervisor for Human Resources |
+| | | `staff` | `staff.hr@ministry.gov` | `password123` | Staff Maker for Human Resources |
+| **Information & Broadcasting** | `GDIB` | `vdg` | `vdg.gdib@ministry.gov` | `password123` | VDG Supervisor for Info & Broadcasting |
+| | | `staff` | `staff.gdib@ministry.gov` | `password123` | Staff Maker for Info & Broadcasting |
+| **Digital Archives** | `DDA` | `vdg` | `vdg.dda@ministry.gov` | `password123` | VDG Supervisor for Digital Archives |
+| | | `staff` | `staff.dda@ministry.gov` | `password123` | Staff Maker for Digital Archives |
+| **Internal Audit** | `DIA` | `vdg` | `vdg.dia@ministry.gov` | `password123` | VDG Supervisor for Internal Audit |
+| | | `staff` | `staff.dia@ministry.gov` | `password123` | Staff Maker for Internal Audit |
+| **Personnel & Administration** | `DPA` | `vdg` | `vdg.dpa@ministry.gov` | `password123` | VDG Supervisor for Personnel |
+| | | `staff` | `staff.dpa@ministry.gov` | `password123` | Staff Maker for Personnel |
+| **Media Management** | `DMM` | `vdg` | `vdg.dmm@ministry.gov` | `password123` | VDG Supervisor for Media Management |
+| | | `staff` | `staff.dmm@ministry.gov` | `password123` | Staff Maker for Media Management |
+
+---
+
+## 🚀 9. Setup & Local Execution
+
 ```bash
 # 1. Clone the repository and navigate into folder
 cd doc-api
 
-# 2. Install PHP dependencies
-composer install
+# 2. Start Docker Sail environment
+./vendor/bin/sail up -d
 
-# 3. Configure environment file
-cp .env.example .env
-php artisan key:generate
+# 3. Run database migrations & seeders
+./vendor/bin/sail artisan migrate:fresh --seed
 
-# 4. Run database migrations & seeders
-php artisan migrate:fresh --seed
-
-# 5. Create storage symlink for uploaded files
-php artisan storage:link
-
-# 6. Start the development server
-php artisan serve --port=8000
+# 4. Storage symlink
+./vendor/bin/sail artisan storage:link
 ```
 
 ---
-*Developed for CADT Mobile Development & Software Engineering — Sarona Project.*
+*Developed for BBU University Mobile Development & Software Engineering — Sarona Project.*
