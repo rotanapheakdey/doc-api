@@ -149,24 +149,27 @@ class DocumentController extends Controller
 
         // Fetch the assigned department details and build verification PDF
         $dept = Department::findOrFail($targetDeptId);
-        $signaturePath = $user->signature ? storage_path('app/public/' . $user->signature) : null;
+        $signaturePath = $user->signature ? $this->resolveAbsolutePath($user->signature) : null;
 
         $pdfData = [
-            'date' => now()->format('F j, Y, g:i a'),
+            'document' => $document,
+            'date' => now(),
             'department' => $dept->name,
             'signature_path' => ($signaturePath && file_exists($signaturePath)) ? $signaturePath : null,
+            'dg_name' => $user->name,
+            'dg_note' => $request->dg_note ?? $document->dg_note,
         ];
 
         $fileName = null;
         try {
-            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.verification', $pdfData);
+            $pdfContent = \App\Services\PdfService::renderView('pdf.verification', $pdfData);
             $fileName = 'directives/directive_' . $document->id . '_' . time() . '.pdf';
             if (!Storage::disk('public')->exists('directives')) {
                 Storage::disk('public')->makeDirectory('directives');
             }
-            Storage::disk('public')->put($fileName, $pdf->output());
+            Storage::disk('public')->put($fileName, $pdfContent);
         } catch (\Exception $e) {
-            Log::error('DomPDF directive generation failed: ' . $e->getMessage());
+            Log::error('PDF directive generation failed: ' . $e->getMessage());
         }
 
         // AUTO-DISPATCH: Directly transitions to dg_directed (bypasses manual file_dept dispatch)
@@ -437,7 +440,7 @@ class DocumentController extends Controller
             $vdgLog = AuditLog::where('document_id', $document->id)
                 ->where('action', 'vdg_signed')
                 ->first();
-            $bypassedVdg = ($document->is_urgent && !$vdgLog);
+            $bypassedVdg = (bool)$document->is_urgent;
 
             if ($bypassedVdg) {
                 // Return 1 step back to Staff
@@ -504,7 +507,7 @@ class DocumentController extends Controller
         $vdgLog = AuditLog::where('document_id', $document->id)
             ->where('action', 'vdg_signed')
             ->first();
-        $bypassedVdg = ($document->is_urgent && !$vdgLog);
+        $bypassedVdg = (bool)$document->is_urgent;
 
         $document->update([
             'status' => 'dg_signed'
@@ -868,16 +871,47 @@ class DocumentController extends Controller
 
     public function downloadDirectiveFile($id)
     {
-        $document = Document::findOrFail($id);
+        $document = Document::with('department')->findOrFail($id);
 
-        if (!$document->directive_file_path) {
-            return response()->json(['message' => 'No directive file generated for this document.'], 404);
+        $absolutePath = $document->directive_file_path ? $this->resolveAbsolutePath($document->directive_file_path) : null;
+
+        // Self-heal: If directive file does not exist or directive_file_path is null, but document has been directed
+        if (!$absolutePath || !file_exists($absolutePath)) {
+            $dept = $document->department;
+            if ($dept || in_array($document->status, ['dg_directed', 'assigned', 'in_progress', 'report_submitted', 'pending_vdg_approval', 'pending_dg_approval', 'dg_signed', 'completed_archive'])) {
+                $dgLog = AuditLog::where('document_id', $document->id)
+                    ->whereIn('action', ['assigned', 'directed'])
+                    ->latest()
+                    ->first();
+                $dgUser = $dgLog ? User::find($dgLog->user_id) : (Auth::user() ?: User::where('role', 'dg')->first());
+                $signaturePath = ($dgUser && $dgUser->signature) ? $this->resolveAbsolutePath($dgUser->signature) : null;
+
+                $pdfData = [
+                    'document' => $document,
+                    'date' => $dgLog ? $dgLog->created_at : ($document->updated_at ?? now()),
+                    'department' => $dept ? $dept->name : 'នាយកដ្ឋានជំនាញ',
+                    'signature_path' => ($signaturePath && file_exists($signaturePath)) ? $signaturePath : null,
+                    'dg_name' => $dgUser ? $dgUser->name : 'ផុស សុវណ្ណ',
+                    'dg_note' => $document->dg_note,
+                ];
+
+                try {
+                    $pdfContent = \App\Services\PdfService::renderView('pdf.verification', $pdfData);
+                    $fileName = 'directives/directive_' . $document->id . '_' . time() . '.pdf';
+                    if (!Storage::disk('public')->exists('directives')) {
+                        Storage::disk('public')->makeDirectory('directives');
+                    }
+                    Storage::disk('public')->put($fileName, $pdfContent);
+                    $document->update(['directive_file_path' => $fileName]);
+                    $absolutePath = $this->resolveAbsolutePath($fileName);
+                } catch (\Exception $e) {
+                    Log::error('PDF directive on-the-fly regeneration failed: ' . $e->getMessage());
+                }
+            }
         }
 
-        $absolutePath = $this->resolveAbsolutePath($document->directive_file_path);
-
         if (!$absolutePath || !file_exists($absolutePath)) {
-            return response()->json(['message' => 'Directive file not found on server storage.'], 404);
+            return response()->json(['message' => 'No directive file generated for this document.'], 404);
         }
 
         $mimeType = mime_content_type($absolutePath) ?: 'application/pdf';
@@ -910,25 +944,30 @@ class DocumentController extends Controller
             return response()->json(['message' => 'Document has not received VDG sign-off yet.'], 404);
         }
 
-        $vdgUser = $vdgLog ? User::find($vdgLog->user_id) : null;
+        $vdgUser = $vdgLog ? User::find($vdgLog->user_id) : (Auth::user() ?: User::where('role', 'vdg')->first());
         $vdgSignedAt = $vdgLog ? $vdgLog->created_at : null;
+        $vdgSigPath = ($vdgUser && $vdgUser->signature) ? $this->resolveAbsolutePath($vdgUser->signature) : null;
+
+        $dgLog = AuditLog::where('document_id', $document->id)
+            ->where('action', 'dg_signed')
+            ->first();
+        $dgUser = $dgLog ? User::find($dgLog->user_id) : User::where('role', 'dg')->first();
+        $dgSignedAt = $dgLog ? $dgLog->created_at : null;
+        $dgSigPath = ($dgLog && $dgUser && $dgUser->signature) ? $this->resolveAbsolutePath($dgUser->signature) : null;
 
         $pdfData = [
             'document' => $document,
             'bypassed_vdg' => false,
             'urgent_reason' => null,
-            'vdg_name' => $vdgUser ? $vdgUser->name : 'Vice Director General',
-            'vdg_signature_path' => ($vdgUser && $vdgUser->signature && file_exists(storage_path('app/public/' . $vdgUser->signature))) 
-                ? storage_path('app/public/' . $vdgUser->signature) 
-                : null,
+            'vdg_name' => $vdgUser ? $vdgUser->name : 'អគ្គនាយករង',
+            'vdg_signature_path' => ($vdgSigPath && file_exists($vdgSigPath)) ? $vdgSigPath : null,
             'vdg_signed_at' => $vdgSignedAt ? $vdgSignedAt->format('F j, Y, g:i a') : now()->format('F j, Y, g:i a'),
-            'dg_name' => null,
-            'dg_signature_path' => null,
-            'dg_signed_at' => null,
+            'dg_name' => $dgUser ? $dgUser->name : 'ផុស សុវណ្ណ',
+            'dg_signature_path' => $dgSigPath,
+            'dg_signed_at' => $dgSignedAt ? $dgSignedAt->format('F j, Y, g:i a') : null,
         ];
 
-        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.report_signature', $pdfData);
-        $output = $pdf->output();
+        $output = \App\Services\PdfService::renderView('pdf.report_signature', $pdfData);
 
         return response($output, 200, [
             'Content-Type'      => 'application/pdf',
@@ -946,41 +985,47 @@ class DocumentController extends Controller
     {
         $document = Document::with('department')->findOrFail($id);
 
-        if (!in_array($document->status, ['dg_signed', 'completed_archive'])) {
+        $isUrgentBypass = (bool)$document->is_urgent;
+
+        if (!in_array($document->status, ['dg_signed', 'completed_archive']) && !($isUrgentBypass && $document->status === 'pending_dg_approval')) {
             return response()->json(['message' => 'Document has not received final DG approval yet.'], 404);
         }
 
-        $vdgLog = AuditLog::where('document_id', $document->id)
-            ->where('action', 'vdg_signed')
-            ->first();
-        $vdgUser = $vdgLog ? User::find($vdgLog->user_id) : null;
-        $vdgSignedAt = $vdgLog ? $vdgLog->created_at : null;
-        $bypassedVdg = ($document->is_urgent && !$vdgLog);
+        if ($isUrgentBypass) {
+            $bypassedVdg = true;
+            $vdgUser = null;
+            $vdgSignedAt = null;
+            $vdgSigPath = null;
+        } else {
+            $vdgLog = AuditLog::where('document_id', $document->id)
+                ->where('action', 'vdg_signed')
+                ->first();
+            $vdgUser = $vdgLog ? User::find($vdgLog->user_id) : null;
+            $vdgSignedAt = $vdgLog ? $vdgLog->created_at : null;
+            $vdgSigPath = ($vdgUser && $vdgUser->signature) ? $this->resolveAbsolutePath($vdgUser->signature) : null;
+            $bypassedVdg = false;
+        }
 
         $dgLog = AuditLog::where('document_id', $document->id)
             ->where('action', 'dg_signed')
             ->first();
-        $dgUser = $dgLog ? User::find($dgLog->user_id) : Auth::user();
-        $dgSignedAt = $dgLog ? $dgLog->created_at : now();
+        $dgUser = $dgLog ? User::find($dgLog->user_id) : (Auth::user() ?: User::where('role', 'dg')->first());
+        $dgSignedAt = $dgLog ? $dgLog->created_at : null;
+        $dgSigPath = ($dgLog && $dgUser && $dgUser->signature) ? $this->resolveAbsolutePath($dgUser->signature) : null;
 
         $pdfData = [
             'document' => $document,
             'bypassed_vdg' => $bypassedVdg,
             'urgent_reason' => $document->urgent_reason,
             'vdg_name' => $vdgUser ? $vdgUser->name : null,
-            'vdg_signature_path' => ($vdgUser && $vdgUser->signature && file_exists(storage_path('app/public/' . $vdgUser->signature))) 
-                ? storage_path('app/public/' . $vdgUser->signature) 
-                : null,
+            'vdg_signature_path' => ($vdgSigPath && file_exists($vdgSigPath)) ? $vdgSigPath : null,
             'vdg_signed_at' => $vdgSignedAt ? $vdgSignedAt->format('F j, Y, g:i a') : null,
-            'dg_name' => $dgUser ? $dgUser->name : 'Director General',
-            'dg_signature_path' => ($dgUser && $dgUser->signature && file_exists(storage_path('app/public/' . $dgUser->signature))) 
-                ? storage_path('app/public/' . $dgUser->signature) 
-                : null,
-            'dg_signed_at' => $dgSignedAt ? $dgSignedAt->format('F j, Y, g:i a') : now()->format('F j, Y, g:i a'),
+            'dg_name' => $dgUser ? $dgUser->name : 'ផុស សុវណ្ណ',
+            'dg_signature_path' => ($dgSigPath && file_exists($dgSigPath)) ? $dgSigPath : null,
+            'dg_signed_at' => $dgSignedAt ? $dgSignedAt->format('F j, Y, g:i a') : null,
         ];
 
-        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.report_signature', $pdfData);
-        $output = $pdf->output();
+        $output = \App\Services\PdfService::renderView('pdf.report_signature', $pdfData);
 
         return response($output, 200, [
             'Content-Type'      => 'application/pdf',
@@ -1035,25 +1080,23 @@ class DocumentController extends Controller
             return false;
         }
 
+        $vdgSigPath = ($vdgUser && $vdgUser->signature) ? $this->resolveAbsolutePath($vdgUser->signature) : null;
+        $dgSigPath = ($dgUser && $dgUser->signature) ? $this->resolveAbsolutePath($dgUser->signature) : null;
+
         $pdfData = [
             'document' => $document,
             'bypassed_vdg' => $bypassedVdg,
             'urgent_reason' => $document->urgent_reason,
             'vdg_name' => $vdgUser ? $vdgUser->name : null,
-            'vdg_signature_path' => ($vdgUser && $vdgUser->signature && file_exists(storage_path('app/public/' . $vdgUser->signature))) 
-                ? storage_path('app/public/' . $vdgUser->signature) 
-                : null,
+            'vdg_signature_path' => ($vdgSigPath && file_exists($vdgSigPath)) ? $vdgSigPath : null,
             'vdg_signed_at' => $vdgSignedAt ? $vdgSignedAt->format('F j, Y, g:i a') : null,
             'dg_name' => $dgUser ? $dgUser->name : null,
-            'dg_signature_path' => ($dgUser && $dgUser->signature && file_exists(storage_path('app/public/' . $dgUser->signature))) 
-                ? storage_path('app/public/' . $dgUser->signature) 
-                : null,
+            'dg_signature_path' => ($dgSigPath && file_exists($dgSigPath)) ? $dgSigPath : null,
             'dg_signed_at' => $dgSignedAt ? $dgSignedAt->format('F j, Y, g:i a') : null,
         ];
 
         try {
-            $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.report_signature', $pdfData);
-            $signaturePageOutput = $pdf->output();
+            $signaturePageOutput = \App\Services\PdfService::renderView('pdf.report_signature', $pdfData);
             
             $tempPath = storage_path('app/temp_sig_' . $document->id . '_' . time() . '.pdf');
             file_put_contents($tempPath, $signaturePageOutput);
