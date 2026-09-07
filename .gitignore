@@ -42,3 +42,4 @@ composer.phar
 
 # Docker
 docker-compose.override.yml
+storage/fonts/
