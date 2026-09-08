@@ -36,10 +36,8 @@ Route::middleware('auth:sanctum')->group(function () {
     
     // Department Membership Routes
     Route::post('/departments/{id}/assign-vdg', [DepartmentController::class, 'assignVdg']);
-    Route::post('/departments/{id}/remove-vdg/{userId}', [DepartmentController::class, 'removeVdg']);
     Route::delete('/departments/{id}/vdg/{userId}', [DepartmentController::class, 'removeVdg']);
     Route::post('/departments/{id}/assign-staff', [DepartmentController::class, 'assignStaff']);
-    Route::post('/departments/{id}/remove-staff/{userId}', [DepartmentController::class, 'removeStaff']);
     Route::delete('/departments/{id}/staff/{userId}', [DepartmentController::class, 'removeStaff']);
 
     // Audit Logs (SuperAdmin, DG, File Dept)
@@ -53,6 +51,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Phase 1: Upload (File Dept)
     Route::post('/documents', [DocumentController::class, 'store']);
     Route::get('/documents', [DocumentController::class, 'index']);
+    Route::get('/documents/archive', [DocumentController::class, 'searchArchive']);
     Route::get('/documents/{id}', [DocumentController::class, 'show']);
     // Phase 2: Assign (DG)
     Route::post('/documents/{id}/direct', [DocumentController::class, 'direct']);
@@ -70,7 +69,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/documents/{id}/reject', [DocumentController::class, 'reject']);
     Route::post('/documents/{id}/return', [DocumentController::class, 'reject']);
 
-    Route::get('/documents/archive', [DocumentController::class, 'searchArchive']);
     Route::get('/documents/{id}/download', [DocumentController::class, 'downloadFile']);
     Route::get('/documents/{id}/report/download', [DocumentController::class, 'downloadReportFile']);
     Route::get('/documents/{id}/directive/download', [DocumentController::class, 'downloadDirectiveFile']);
