@@ -357,12 +357,7 @@ $resolvedVdgDate = $vdg_signed_at ?? $document->vdg_signed_at ?? null;
                         <tr>
                             <td align="center" style="font-family: 'KhmerOSMoulLight', 'moul', serif; font-weight: normal; font-size: 10.5pt; color: #0f172a; padding-bottom: 8px;">បានឃើញ និងឯកភាព</td>
                         </tr>
-                        <tr>
-                            <td align="center" style="font-size: 9pt; color: #475569; padding-bottom: 4px; line-height: 1.6;">សូមគោរពជូន ឯកឧត្តមប្រតិភូរាជរដ្ឋាភិបាល</td>
-                        </tr>
-                        <tr>
-                            <td align="center" style="font-size: 9pt; color: #475569; padding-bottom: 10px; line-height: 1.6;">មេត្តាពិនិត្យ និងសម្រេចដ៏ខ្ពង់ខ្ពស់</td>
-                        </tr>
+
                         <tr>
                             <td align="center" style="font-size: 9.5pt; color: #334155; padding-bottom: 8px; line-height: 1.6;">រាជធានីភ្នំពេញ, {{ formatKhmerDate($resolvedVdgDate ?? now()) }}</td>
                         </tr>
@@ -398,6 +393,9 @@ $resolvedVdgDate = $vdg_signed_at ?? $document->vdg_signed_at ?? null;
             <!-- RIGHT COLUMN: DG FINAL APPROVAL SIGNATURE -->
             <td class="sig-col" style="{{ $isBypassed ? 'width: 55%;' : 'width: 50%;' }}">
                 <table style="width: 100%; border-collapse: collapse; text-align: center;">
+                                            <tr>
+                            <td align="center" style="font-family: 'KhmerOSMoulLight', 'moul', serif; font-weight: normal; font-size: 10.5pt; color: #0f172a; padding-bottom: 8px;">បានឃើញ និងឯកភាព</td>
+                        </tr>
                     <tr>
                         <td align="center" style="font-size: 9.5pt; color: #334155; padding-bottom: 8px; line-height: 1.6;">
                             @if($resolvedDgDate)

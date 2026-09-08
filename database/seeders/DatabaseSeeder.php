@@ -13,6 +13,17 @@ class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
+        // 0. CREATE SUPER ADMIN
+        User::firstOrCreate(
+            ['email' => 'superadmin@ministry.gov'],
+            [
+                'name' => 'Super Administrator',
+                'password' => Hash::make(env('SUPERADMIN_DEFAULT_PASSWORD', 'password123')),
+                'role' => 'super_admin',
+                'department_id' => null,
+            ]
+        );
+
         // 1. CREATE CENTRAL CORE USERS
         $dg = User::create([
             'name' => 'Director General',
