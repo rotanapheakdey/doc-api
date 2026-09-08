@@ -14,21 +14,35 @@ use Illuminate\Support\Facades\Storage;
 class UserController extends Controller
 {
     /**
-     * List all users with optional filtering.
+     * List users with role-based visibility scoping.
+     * - SuperAdmin, DG, File Dept: Full global user list
+     * - VDG: Only users within their assigned department
+     * - Staff/Department: Only users within their assigned department
      */
     public function index(Request $request)
     {
+        $caller = auth('sanctum')->user();
         $query = User::with('department');
+
+        // Authorization Gate: Non-admin roles can only see their own department
+        if (!$caller->canManageUsers()) {
+            if ($caller->department_id) {
+                $query->where('department_id', $caller->department_id);
+            } else {
+                // Users without a department assignment can only see themselves
+                $query->where('id', $caller->id);
+            }
+        }
 
         if ($request->filled('role')) {
             $query->where('role', $request->role);
         }
 
-        if ($request->filled('department_id')) {
+        if ($request->filled('department_id') && $caller->canManageUsers()) {
             $query->where('department_id', $request->department_id);
         }
 
-        if ($request->boolean('unassigned')) {
+        if ($request->boolean('unassigned') && $caller->canManageUsers()) {
             $query->whereNull('department_id');
         }
 
@@ -125,10 +139,12 @@ class UserController extends Controller
     }
 
     /**
-     * View user details.
+     * View user details with authorization scoping.
+     * Non-admin users can only view themselves or same-department users.
      */
     public function show($id)
     {
+        $caller = auth('sanctum')->user();
         $user = User::with('department')->find($id);
 
         if (!$user) {
@@ -136,6 +152,16 @@ class UserController extends Controller
                 'success' => false,
                 'message' => 'User not found'
             ], 404);
+        }
+
+        // Authorization: non-admins can only view own profile or same-department users
+        if (!$caller->canManageUsers() && $caller->id !== $user->id) {
+            if (!$caller->department_id || $caller->department_id !== $user->department_id) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Access denied. You can only view users in your department.'
+                ], 403);
+            }
         }
 
         return response()->json([
