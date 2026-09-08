@@ -55,13 +55,23 @@ class User extends Authenticatable
         return $this->belongsTo(Department::class, 'department_id');
     }
 
-    public function canHaveDepartment()
+    public function isSuperAdmin(): bool
     {
-        return !in_array($this->role, ['dg', 'file_dept']);
+        return $this->role === 'super_admin';
     }
 
-    public function canManageUsers()
+    public function canHaveDepartment(): bool
     {
-        return in_array($this->role, ['dg', 'file_dept']);
+        return !in_array($this->role, ['super_admin', 'dg', 'file_dept']);
+    }
+
+    public function canManageUsers(): bool
+    {
+        return in_array($this->role, ['super_admin', 'dg', 'file_dept']);
+    }
+
+    public function canManageDepartments(): bool
+    {
+        return $this->role === 'super_admin';
     }
 }
