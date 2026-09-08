@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\DepartmentController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\UserController;
@@ -13,6 +14,7 @@ Route::post('/login', [AuthController::class, 'login']);
 // PROTECTED ROUTES: You MUST have a valid token to access these
 Route::middleware('auth:sanctum')->group(function () {
 
+    // User Management Routes
     Route::get('/users', [UserController::class, 'index']);
     Route::get('/users/{id}', [UserController::class, 'show']);
     Route::post('/users', [UserController::class, 'store']);
@@ -20,11 +22,29 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/users/{id}', [UserController::class, 'destroy']);
     Route::get('/departments/list', [UserController::class, 'getDepartments']);
 
-
     Route::post('/users/{id}/avatar', [UserController::class, 'updateAvatar']);
     Route::delete('/users/{id}/avatar', [UserController::class, 'removeAvatar']);
     Route::post('/users/{id}/signature', [UserController::class, 'updateSignature']);
     Route::delete('/users/{id}/signature', [UserController::class, 'removeSignature']);
+
+    // Department Management Routes (SuperAdmin & General)
+    Route::get('/departments', [DepartmentController::class, 'index']);
+    Route::post('/departments', [DepartmentController::class, 'store']);
+    Route::get('/departments/{id}', [DepartmentController::class, 'show']);
+    Route::put('/departments/{id}', [DepartmentController::class, 'update']);
+    Route::delete('/departments/{id}', [DepartmentController::class, 'destroy']);
+    
+    // Department Membership Routes
+    Route::post('/departments/{id}/assign-vdg', [DepartmentController::class, 'assignVdg']);
+    Route::post('/departments/{id}/remove-vdg/{userId}', [DepartmentController::class, 'removeVdg']);
+    Route::delete('/departments/{id}/vdg/{userId}', [DepartmentController::class, 'removeVdg']);
+    Route::post('/departments/{id}/assign-staff', [DepartmentController::class, 'assignStaff']);
+    Route::post('/departments/{id}/remove-staff/{userId}', [DepartmentController::class, 'removeStaff']);
+    Route::delete('/departments/{id}/staff/{userId}', [DepartmentController::class, 'removeStaff']);
+
+    // Audit Logs (SuperAdmin, DG, File Dept)
+    Route::get('/audit-logs', [AuditLogController::class, 'index']);
+
     // Core Visibility Feeds
     Route::get('/documents/urgent', [DocumentController::class, 'urgentFeed']);
     Route::get('/departments/inbox', [DocumentController::class, 'departmentInbox']);
@@ -32,12 +52,13 @@ Route::middleware('auth:sanctum')->group(function () {
     // The 7-Step State Machine Action Routes
     // Phase 1: Upload (File Dept)
     Route::post('/documents', [DocumentController::class, 'store']);
-      Route::get('/documents', [DocumentController::class, 'index']);
+    Route::get('/documents', [DocumentController::class, 'index']);
+    Route::get('/documents/{id}', [DocumentController::class, 'show']);
     // Phase 2: Assign (DG)
     Route::post('/documents/{id}/direct', [DocumentController::class, 'direct']);
     // Phase 3: Dispatch (File Dept)
     Route::post('/documents/{id}/dispatch', [DocumentController::class, 'dispatch']);
-    // Phase 4: Upload Work (VDG)
+    // Phase 4: Upload Work (Staff)
     Route::post('/documents/{id}/report', [DocumentController::class, 'uploadReport']);
     // Phase 5: VDG Sign (VDG)
     Route::post('/documents/{id}/vdg-sign', [DocumentController::class, 'vdgSign']);
@@ -56,7 +77,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/documents/{id}/vdg-sign/download', [DocumentController::class, 'downloadVdgSignFile']);
     Route::get('/documents/{id}/final-sign/download', [DocumentController::class, 'downloadFinalSignFile']);
 
-    Route::get('/departments', [DepartmentController::class, 'index']);
     // Logout
     Route::post('/logout', [AuthController::class, 'logout']);
 });
