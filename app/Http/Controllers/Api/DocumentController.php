@@ -748,6 +748,26 @@ class DocumentController extends Controller
     // PDF ENGINE & STREAMING HELPERS
     // ==========================================
 
+    /**
+     * Check if the current user has access to download a document.
+     * Returns null if authorized, or a JSON response if denied.
+     */
+    private function authorizeDocumentDownload($document)
+    {
+        $user = Auth::user();
+
+        // SuperAdmin, DG, File Dept have global download access
+        if (in_array($user->role, ['super_admin', 'dg', 'file_dept'])) {
+            return null;
+        }
+
+        // VDG, Staff, Department can only download documents assigned to their department
+        if ($document->assigned_department_id !== $user->department_id) {
+            return response()->json(['message' => 'Access Denied. This document is not in your department.'], 403);
+        }
+
+        return null;
+    }
     private function resolveAbsolutePath($filePath)
     {
         if (!$filePath) return null;
@@ -778,6 +798,9 @@ class DocumentController extends Controller
     public function downloadFile($id)
     {
         $document = Document::findOrFail($id);
+        // Authorization: enforce department-level access control
+        $authDenied = $this->authorizeDocumentDownload($document);
+        if ($authDenied) return $authDenied;
 
         if ($document->status === 'completed_archive') {
             return $this->downloadMergedArchivePdf($document);
@@ -880,6 +903,9 @@ class DocumentController extends Controller
     public function downloadReportFile($id)
     {
         $document = Document::findOrFail($id);
+        // Authorization: enforce department-level access control
+        $authDenied = $this->authorizeDocumentDownload($document);
+        if ($authDenied) return $authDenied;
 
         if (!$document->report_path) {
             return response()->json(['message' => 'No action report attached to this document yet.'], 404);
@@ -905,6 +931,9 @@ class DocumentController extends Controller
     public function downloadDirectiveFile($id)
     {
         $document = Document::with('department')->findOrFail($id);
+        // Authorization: enforce department-level access control
+        $authDenied = $this->authorizeDocumentDownload($document);
+        if ($authDenied) return $authDenied;
 
         $absolutePath = $document->directive_file_path ? $this->resolveAbsolutePath($document->directive_file_path) : null;
 
@@ -964,6 +993,9 @@ class DocumentController extends Controller
     public function downloadVdgSignFile($id)
     {
         $document = Document::with('department')->findOrFail($id);
+        // Authorization: enforce department-level access control
+        $authDenied = $this->authorizeDocumentDownload($document);
+        if ($authDenied) return $authDenied;
 
         if ($document->is_urgent) {
             return response()->json(['message' => 'VDG review was bypassed for this urgent document.'], 404);
@@ -1017,6 +1049,9 @@ class DocumentController extends Controller
     public function downloadFinalSignFile($id)
     {
         $document = Document::with('department')->findOrFail($id);
+        // Authorization: enforce department-level access control
+        $authDenied = $this->authorizeDocumentDownload($document);
+        if ($authDenied) return $authDenied;
 
         $isUrgentBypass = (bool)$document->is_urgent;
 
