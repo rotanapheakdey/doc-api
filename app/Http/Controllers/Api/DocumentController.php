@@ -26,7 +26,7 @@ class DocumentController extends Controller
         $user = Auth::user();
 
         // DG and File Dept have global visibility
-        if (in_array($user->role, ['dg', 'file_dept'])) {
+        if (in_array($user->role, ['super_admin', 'dg', 'file_dept'])) {
             $documents = Document::with(['uploader:id,name', 'department:id,name'])
                 ->orderBy('created_at', 'desc')
                 ->get();
@@ -615,7 +615,7 @@ class DocumentController extends Controller
 
         return response()->json([
             'user_role' => $user->role,
-            'access_level' => in_array($user->role, ['dg', 'file_dept']) ? 'Global Access' : 'Department Restricted',
+            'access_level' => in_array($user->role, ['super_admin', 'dg', 'file_dept']) ? 'Global Access' : 'Department Restricted',
             'result_count' => $documents->count(),
             'documents' => $documents
         ], 200);
@@ -635,6 +635,19 @@ class DocumentController extends Controller
         $query = Document::query();
 
         switch ($user->role) {
+            case 'super_admin':
+                // SuperAdmin oversees all actionable / pending documents ministry-wide
+                $query->whereIn('status', [
+                    'pending_dg_init',
+                    'dg_directed',
+                    'pending_dispatch',
+                    'pending_vdg_approval',
+                    'pending_dg_approval',
+                    'dg_signed'
+                ])
+                ->orderBy('is_urgent', 'desc')
+                ->orderBy('created_at', 'desc');
+                break;
             case 'dg':
                 // DG handles:
                 // 1. Initial endorsements (pending_dg_init)
@@ -690,6 +703,26 @@ class DocumentController extends Controller
     public function departmentInbox(Request $request)
     {
         $user = Auth::user();
+
+        if ($user->role === 'super_admin') {
+            $query = Document::query();
+            if ($request->filled('department_id')) {
+                $query->where('assigned_department_id', $request->department_id);
+            }
+            $documents = $query->whereIn('status', ['dg_directed', 'pending_vdg_approval', 'pending_dg_approval'])
+                ->with(['uploader:id,name', 'department:id,name'])
+                ->orderBy('is_urgent', 'desc')
+                ->orderBy('updated_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'user_name' => $user->name,
+                'role' => $user->role,
+                'department_id' => $request->department_id,
+                'document_count' => $documents->count(),
+                'documents' => $documents
+            ], 200);
+        }
 
         if (!in_array($user->role, ['vdg', 'department', 'staff']) || !$user->department_id) {
             return response()->json(['message' => 'Unauthorized.'], 403);
